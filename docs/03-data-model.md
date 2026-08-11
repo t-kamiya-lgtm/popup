@@ -87,17 +87,18 @@ CREATE TABLE sites (
 > プライムダイレクトでは商品ページ URL に商品コードが出ていない
 > （`pm100` は URL のスラッグであり実際の商品コードではない）ため、
 > **「どのページを見たか」で商品を特定するのをやめ、
-> 「実際にカートに入って購入された商品コード」を CV タグから受け取る**方式にします。
+> 「実際にカートに入って購入された商品コード」を受注API から取得**する方式にします。
 >
 > ページ側の商品コードタグ（`05-tag-sdk.md` 旧 1.3）は**廃止**します。
-> 商品はサンクスページの差し込み変数（カートイン商品コード）でのみ識別します。
+> 商品はスマレジEC 受注API の `order_detail.product_code`（明細単位）でのみ識別します
+> （`09-cart-integration.md` 3〜4 章）。
 
 ```sql
 CREATE TABLE products (
   id           BIGSERIAL PRIMARY KEY,
   site_id      BIGINT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-  product_code TEXT NOT NULL,               -- カート側の商品コード（受注データ由来）
-  name         TEXT NOT NULL DEFAULT '',    -- タグ受信値 or 管理画面で編集
+  product_code TEXT NOT NULL,               -- 受注API の order_detail.product_code
+  name         TEXT NOT NULL DEFAULT '',    -- order_detail.product_name / 管理画面で編集
   archived     BOOLEAN NOT NULL DEFAULT false,
   first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -105,8 +106,9 @@ CREATE TABLE products (
 );
 ```
 
-初めて受信した商品コードは CV イベント受信時に自動で upsert される
-（**imp/click 時点ではなく、CV 到達時点で初めて商品が確定する**点に注意）。
+初めて受信した商品コードは**受注API 同期バッチ**が `order_items` を書き込む際に
+自動で upsert される（CV タグ到達時点ではなく、**受注API との突合が完了した時点**で
+初めて商品が確定する点に注意。`sync_status` は 3 節参照）。
 
 ### page_groups（ページの分類。imp / click の集計単位）
 
@@ -299,7 +301,6 @@ CREATE TABLE events (
   campaign_id    BIGINT,
   creative_id    BIGINT,
   config_version BIGINT,
-  product_id     BIGINT,                   -- products.id
   page_group_id  BIGINT,
   page_path      TEXT,
   device         TEXT CHECK (device IN ('pc','sp','tablet')),
@@ -307,13 +308,14 @@ CREATE TABLE events (
   session_id     TEXT,
   trigger_type   TEXT,
   position       TEXT,
-  -- CV 用
+  -- CV 用（受注APIによる補完が前提。09-cart-integration.md 3章参照）
   order_id       TEXT,
   order_type     TEXT CHECK (order_type IN ('first','recurring')),
-  plan_type      TEXT CHECK (plan_type IN ('subscription','onetime')),
-  revenue        NUMERIC(12,2),
+  revenue        NUMERIC(12,2),             -- 注文合計（明細内訳は order_items）
   attribution    TEXT CHECK (attribution IN ('none','click','view')),
   latency_sec    INT,                      -- 接触から CV までの秒数
+  sync_status    TEXT CHECK (sync_status IN ('pending','confirmed')) DEFAULT 'pending',
+  synced_at      TIMESTAMPTZ,              -- 受注APIとの突合が完了した時刻
   is_bot         BOOLEAN NOT NULL DEFAULT false,
   PRIMARY KEY (id, occurred_at)
 ) PARTITION BY RANGE (occurred_at);
@@ -322,24 +324,50 @@ CREATE UNIQUE INDEX ON events (event_id, occurred_at);
 CREATE UNIQUE INDEX events_cv_order ON events (site_id, order_id)
   WHERE event_type = 'cv' AND order_id IS NOT NULL;
 CREATE INDEX ON events (site_id, occurred_at DESC);
+CREATE INDEX events_cv_pending ON events (site_id, order_id) WHERE sync_status = 'pending';
 ```
 
 - `event_id` で重複排除（ネットワーク再送・ページ再読込対策）
 - CV は部分ユニークインデックスで `site_id + order_id` の重複を**DB レベルで**排除
 - パーティションは月次。13 ヶ月経過したパーティションを `DROP` して保持期限を実装
+- cv イベントは**2 段階で確定**する: サンクスページのタグ到達時点で `sync_status='pending'`
+  として仮登録（`order_id` とタッチ情報のみ）→ 受注API 同期バッチが `order_type` / `revenue`
+  を補完して `sync_status='confirmed'` に更新する（`09-cart-integration.md` 3.2 節）
 
-### `product_id` は cv イベントのみに入る（imp/click には入らない）
+### order_items（受注API から取得した注文明細）
 
-| event_type | `product_id` | `page_group_id` |
-| --- | --- | --- |
-| `imp` / `click` / `close` / `holdout` | 常に `NULL`（ページから商品を特定しないため） | URL ルールでマッチした値 |
-| `cv` | **注文の実際の商品コード**（差し込み変数から解決） | `NULL`（サンクスページは分類対象外） |
+商品別レポートの実体はこのテーブルです。`events` の `product_id` カラムは持ちません
+（1 注文が複数商品を含みうるため、1 対 1 のカラムでは表現できないことが
+受注API の `order_detail` 仕様（配列）から判明したためです）。
 
-**同一の CV イベントが複数商品を含む注文だった場合の扱い**:
-スマレジ・リピートは単品リピート通販のため、1 注文 1 商品が基本と想定します。
-CV タグからは**注文の主要商品コード 1 つ**を受け取り、`events.product_id` に 1 件だけ記録します。
-複数商品が同時購入されるケースがある場合は、Phase 2 で `order_items` サブテーブルへの
-分割記録（注文明細単位の売上按分）を追加します（1.1 チェックリストで確認中）。
+```sql
+CREATE TABLE order_items (
+  id           BIGSERIAL PRIMARY KEY,
+  site_id      BIGINT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  order_id     TEXT NOT NULL,              -- events.order_id と対応
+  line_no      INT NOT NULL,               -- order_detail.product_no
+  product_id   BIGINT NOT NULL REFERENCES products(id),
+  product_code TEXT NOT NULL,              -- スナップショット（product_code 変更に強くする）
+  quantity     INT NOT NULL,
+  revenue      NUMERIC(12,2) NOT NULL,     -- order_detail.product_total
+  is_subscription BOOLEAN NOT NULL DEFAULT false,  -- product_reg_flag = '定期'
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (site_id, order_id, line_no)
+);
+CREATE INDEX ON order_items (site_id, product_id);
+```
+
+- 受注API 同期バッチが `order_detail` を 1 行 1 レコードとして展開して書き込む
+- 商品別レポートの CV・売上は、`order_items` を `events`（`site_id + order_id` で結合）
+  経由してキャンペーン・クリエイティブに紐づけて集計する（アトリビューションは
+  注文単位で決まり、注文内の全商品に同じキャンペーンが帰属する）
+
+### `page_group_id` は imp/click のみに入る
+
+| event_type | `page_group_id` |
+| --- | --- |
+| `imp` / `click` / `close` / `holdout` | URL ルールでマッチした値 |
+| `cv` | `NULL`（サンクスページは分類対象外。商品情報は `order_items` に持つ） |
 
 ## 4. ロールアップ（レポート用）
 
@@ -372,6 +400,11 @@ CREATE TABLE stats_daily (
 1 行の中で `product_id <> 0` の行は `imps/clicks = 0`・`cv/revenue` のみが入り、
 `page_group_id <> 0` の行は `cv/revenue = 0`・`imps/clicks` のみが入ります。
 
+**`product_id` 行の作り方**: `order_items` を `events`（`site_id + order_id` で結合、
+`sync_status='confirmed'` の行のみ）と突き合わせ、`order_items.product_id` ごとに
+`revenue` を合計、`events.order_id` の distinct 数を `cv_click`/`cv_view` として集計する
+（キャンペーン・クリエイティブ・attribution は結合元の `events` 行から引き継ぐ）。
+
 管理画面の集計軸は、このテーブルの GROUP BY だけで全て満たせる:
 
 | 画面 | GROUP BY | 見られる指標 |
@@ -383,8 +416,10 @@ CREATE TABLE stats_daily (
 | デバイス別 | device | 全指標 |
 | キャンペーン別 | campaign_id |
 
-集計は日次 Cron で `events` から `INSERT ... ON CONFLICT DO UPDATE`。
-CV は最大 7 日遅れて到着するため、**毎回過去 8 日分を再集計**する。
+集計は日次 Cron で `events` / `order_items` から `INSERT ... ON CONFLICT DO UPDATE`。
+CV は受注API 同期の遅延を含めて最大 7 日遅れて確定するため、
+**毎回過去 8 日分を再集計**する（`sync_status='pending'` のまま 8 日を超えた
+CV は「注文突合失敗」として管理画面にアラート表示する）。
 
 ## 5. 保持ポリシー
 

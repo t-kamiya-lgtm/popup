@@ -121,25 +121,24 @@ POST /e   Content-Type: application/json  (sendBeacon / keepalive fetch)
 }
 ```
 
-CV イベントのみ追加フィールド:
+CV イベントのみ追加フィールド。**受注API 連携（`09-cart-integration.md` 3 章）を
+前提とし、クライアントから送るのは注文番号とタッチ情報のみ**にしています
+（商品コード・金額・初回/継続の判定は受注API 同期バッチが後追いで補完します）。
 
 ```jsonc
 {
   "t": "cv",
-  "orderId": "EC-20260811-0001",
-  "productCode": "PD-1001",          // ★ カートイン商品コード（差し込み変数から）。商品別レポートの唯一のキー
-  "orderType": "first",              // 'first' | 'recurring'（既定は first のみ CV 計上）
-  "planType": "subscription",        // 'subscription' | 'onetime'
-  "revenue": 5400, "currency": "JPY",
+  "orderId": "EC-20260811-0001",      // order.ec_order_id と一致させる（唯一必須）
   "touch": { "cid": 501, "crid": 9002, "type": "click", "ts": 1786490000000 }
 }
 ```
 
-- `productCode` が空、または未展開の差し込み変数（`{{` を含む）の場合は
-  `product_id = NULL` で記録する（商品別レポートには乗らないが、CV 件数・キャンペーン成果には計上される）
 - 応答は常に `204 No Content`（レスポンスボディ無しで最速）
 - サーバ側検証: `Origin` が `sites.allowed_hosts` に含まれるか、`touch.ts` が CV ウィンドウ内か
-- `revenue` はクライアント値のため参考値である旨を管理画面に明記（厳密値が要る場合は S2S CV API）
+- この時点では `events.sync_status = 'pending'`。受注API 同期バッチが
+  `order_type` / `revenue` / `order_items`（商品コード・数量）を補完し
+  `sync_status = 'confirmed'` にする（`03-data-model.md` 3 章）
+- `orderId` が空の場合は送信しない（重複排除キーが無い CV は受注APIと突合できない）
 
 > `touch.tok`（HMAC 署名）は、カートが別ドメインの場合にのみ必要です。
 > プライムダイレクトは単一ドメイン構成のため、この節は付与しません（`09-cart-integration.md` 参照）。
@@ -172,7 +171,38 @@ Authorization: Bearer {siteApiKey}
 
 サーバ側で `pzToken` → `visitorId` の順に接触を検索してアトリビューションを付与。
 ブラウザ CV と `orderId` で重複排除する（S2S を正とする）。
-スマレジ・リピートのサンクスページに JS タグを設置できない場合の主経路になります。
+サンクスページに JS タグを設置できない顧客カート向けの経路として設計を保持します
+（プライムダイレクトでは 1.5 節の方式を使うため、これは未使用）。
+
+### 1.5 受注API 同期（内部バッチ・こちらがスマレジECを呼び出す）
+
+1.4 節が「相手からこちらへ push してもらう」方式なのに対し、これは
+**こちらから相手の受注API を pull しにいく**方式です。プライムダイレクトが
+スマレジEC・受注API を提供しているため、こちらを主経路として採用しています
+（`09-cart-integration.md` 3〜4 章に詳細設計）。
+
+```
+[内部バッチ: サーバ側 Cron ジョブ]
+GET/POST https://{カートのAPIドメイン}/api/v2/orders/search
+Authorization: Bearer {サイトごとに登録した access_token}
+
+body: {
+  "search_options": { "update_date_from": "{前回同期時刻}" },
+  "response_options": { "response_type": "json" }
+}
+```
+
+処理内容:
+
+1. `sites.orderApi`（`accessToken` / `baseUrl` / 前回同期時刻）を site ごとに読む
+2. `order.ec_order_id` を `events.order_id`（`sync_status='pending'`）と突合
+3. マッチした注文の `order_detail[]` を `order_items` へ展開して書き込む
+4. `order.order_cnt` から `order_type` を決定し、`events` を `sync_status='confirmed'` に更新
+5. 8 日以上 `pending` のまま残る CV は「注文突合失敗」として管理画面にアラート
+
+このエンドポイントは管理 API・計測 API のどちらとも異なり、**顧客のカート API を
+こちらが呼び出す内部ジョブ**である点に注意してください（顧客からのリクエストを
+受ける形ではありません）。
 
 ## 2. 管理 API（認証必須 / REST）
 
