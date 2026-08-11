@@ -81,16 +81,22 @@ CREATE TABLE sites (
 );
 ```
 
-### products（レポートの主集計軸）
+### products（CV・売上レポートの主集計軸）
 
-商品コードはタグから確実に受け取れるため、**URL パターンによる分類は不要**。
-初めて受信した商品コードは自動で upsert し、名称は管理画面で編集できる。
+> **重要な設計変更**（2026-08 確認結果を反映）:
+> プライムダイレクトでは商品ページ URL に商品コードが出ていない
+> （`pm100` は URL のスラッグであり実際の商品コードではない）ため、
+> **「どのページを見たか」で商品を特定するのをやめ、
+> 「実際にカートに入って購入された商品コード」を CV タグから受け取る**方式にします。
+>
+> ページ側の商品コードタグ（`05-tag-sdk.md` 旧 1.3）は**廃止**します。
+> 商品はサンクスページの差し込み変数（カートイン商品コード）でのみ識別します。
 
 ```sql
 CREATE TABLE products (
   id           BIGSERIAL PRIMARY KEY,
   site_id      BIGINT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-  product_code TEXT NOT NULL,               -- カート側の商品コード
+  product_code TEXT NOT NULL,               -- カート側の商品コード（受注データ由来）
   name         TEXT NOT NULL DEFAULT '',    -- タグ受信値 or 管理画面で編集
   archived     BOOLEAN NOT NULL DEFAULT false,
   first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -99,15 +105,19 @@ CREATE TABLE products (
 );
 ```
 
-### page_groups（商品ページ以外の補助的な集計単位）
+初めて受信した商品コードは CV イベント受信時に自動で upsert される
+（**imp/click 時点ではなく、CV 到達時点で初めて商品が確定する**点に注意）。
 
-LP・記事ページなど商品コードを持たないページを分類するために残す。
+### page_groups（ページの分類。imp / click の集計単位）
+
+商品コードがページから取れないため、**imp / click のエンゲージメント集計は
+URL ルールベースの page_group が唯一の軸**になります。
 
 ```sql
 CREATE TABLE page_groups (
   id         BIGSERIAL PRIMARY KEY,
   site_id    BIGINT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-  name       TEXT NOT NULL,                -- 例: 「定期LP（A案）」
+  name       TEXT NOT NULL,                -- 例: 「protein.html（LP）」「products/pm100（商品ページ）」
   match_type TEXT NOT NULL CHECK (match_type IN ('exact','prefix','contains','regex')),
   pattern    TEXT NOT NULL,
   priority   INT NOT NULL DEFAULT 100,     -- 小さいほど優先
@@ -116,8 +126,21 @@ CREATE TABLE page_groups (
 CREATE INDEX ON page_groups (site_id, priority);
 ```
 
-分類の優先順位: `productCode` があればそれを採用 → なければ page_group にマッチ →
-どちらも無ければ「その他」に集約。
+### 商品（product_id）とページ（page_group_id）は別軸として持つ
+
+これまでの設計では「ページ ＝ 商品」という前提でしたが、
+**この前提が崩れた**ため、2 つの軸を明確に分離します。
+
+| 軸 | 何で決まるか | どのイベントに付くか | 用途 |
+| --- | --- | --- | --- |
+| `page_group_id` | 閲覧した URL（URL ルール） | imp / click | 「どのページでバナーが見られ、クリックされたか」＝エンゲージメント |
+| `product_id` | **注文の実際の商品コード**（CV タグの差し込み変数） | cv のみ | 「実際に何が売れたか」＝ 売上・CV 実績 |
+
+**imp/click の `product_id` と cv の `product_id` は、同一行でも一致するとは限りません。**
+例えば `protein.html`（LP）経由の click に対し、CV では「プロテイン定期便 A」が
+購入されたことが分かる、といった形です。したがってレポートの
+「商品別」テーブルは**インプレッション・クリックを持たず、CV と売上のみを表示**します
+（`06-admin.md` 5.3 節を参照。エンゲージメントは「ページ別」で見ます）。
 
 ### campaigns
 
@@ -178,7 +201,10 @@ CREATE TABLE campaigns (
 
 ### campaign_targets（配信対象ページ）
 
-商品コード指定と URL ルール指定の両方に対応する。
+> **設計変更**: 配信対象の指定（ターゲティング）は商品コードでは行えません
+> （ページ側に確実な商品コードが無いため）。**URL ルールのみ**で行います。
+> `target_type` は将来 他サイト導入時にページへ商品コードを埋め込める場合に
+> 備えて残しますが、プライムダイレクトでは `url` のみ使用します。
 
 ```sql
 CREATE TABLE campaign_targets (
@@ -302,6 +328,19 @@ CREATE INDEX ON events (site_id, occurred_at DESC);
 - CV は部分ユニークインデックスで `site_id + order_id` の重複を**DB レベルで**排除
 - パーティションは月次。13 ヶ月経過したパーティションを `DROP` して保持期限を実装
 
+### `product_id` は cv イベントのみに入る（imp/click には入らない）
+
+| event_type | `product_id` | `page_group_id` |
+| --- | --- | --- |
+| `imp` / `click` / `close` / `holdout` | 常に `NULL`（ページから商品を特定しないため） | URL ルールでマッチした値 |
+| `cv` | **注文の実際の商品コード**（差し込み変数から解決） | `NULL`（サンクスページは分類対象外） |
+
+**同一の CV イベントが複数商品を含む注文だった場合の扱い**:
+スマレジ・リピートは単品リピート通販のため、1 注文 1 商品が基本と想定します。
+CV タグからは**注文の主要商品コード 1 つ**を受け取り、`events.product_id` に 1 件だけ記録します。
+複数商品が同時購入されるケースがある場合は、Phase 2 で `order_items` サブテーブルへの
+分割記録（注文明細単位の売上按分）を追加します（1.1 チェックリストで確認中）。
+
 ## 4. ロールアップ（レポート用）
 
 レポートは常にこのテーブルを参照する（生イベントを直接クエリするコードは書かない。
@@ -329,15 +368,19 @@ CREATE TABLE stats_daily (
 );
 ```
 
+`product_id` と `page_group_id` は互いに排他です（前節参照）。
+1 行の中で `product_id <> 0` の行は `imps/clicks = 0`・`cv/revenue` のみが入り、
+`page_group_id <> 0` の行は `cv/revenue = 0`・`imps/clicks` のみが入ります。
+
 管理画面の集計軸は、このテーブルの GROUP BY だけで全て満たせる:
 
-| 画面 | GROUP BY |
-| --- | --- |
-| 期間サマリ | date |
-| 商品別 | product_id |
-| ページ別（商品以外） | page_group_id |
-| クリエイティブ別 | creative_id |
-| デバイス別 | device |
+| 画面 | GROUP BY | 見られる指標 |
+| --- | --- | --- |
+| 期間サマリ | date | 全指標（キャンペーン全体の合計） |
+| **商品別**（実売上） | `product_id`（`<> 0` の行のみ） | cv, revenue のみ（imp/click は持たない） |
+| **ページ別**（エンゲージメント） | `page_group_id`（`<> 0` の行のみ） | imp, click, CTR のみ（cv は持たない） |
+| クリエイティブ別 | creative_id | 全指標（campaign 経由の touch で紐づくため imp/click/cv すべて出せる） |
+| デバイス別 | device | 全指標 |
 | キャンペーン別 | campaign_id |
 
 集計は日次 Cron で `events` から `INSERT ... ON CONFLICT DO UPDATE`。

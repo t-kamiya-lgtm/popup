@@ -35,10 +35,10 @@ Next.js の Route Handler で生成し、CDN でキャッシュする（別途 p
       "priority": 100,
       "period": { "from": "2026-08-01T00:00:00+09:00", "to": null },
       "targets": {
-        "productCodes": { "include": ["1001", "1002"], "exclude": [] },
+        // ページ側に確実な商品コードが無いため URL ルールのみで判定する
         "urls": {
           "include": [{ "match": "prefix", "pattern": "/lp/" }],
-          "exclude": [{ "match": "contains", "pattern": "/cart" }]
+          "exclude": [{ "match": "contains", "pattern": "/cart" }, { "match": "contains", "pattern": "/shopping" }]
         }
       },
       "devices": ["pc", "sp"],
@@ -112,9 +112,8 @@ POST /e   Content-Type: application/json  (sendBeacon / keepalive fetch)
       "t": "imp",                       // imp | click | cv | close | holdout
       "ts": 1786500000000,
       "cid": 501, "crid": 9002,
-      "url": "https://shop.example.com/products/1001?utm_source=mail",
-      "pc": "1001",                     // productCode（タグから受領）
-      "pn": "定期コースA",               // productName（初回受信時に自動登録）
+      "url": "https://shop.example.com/protein.html?utm_source=mail",
+      "pg": 11,                          // pageGroupId（URL ルールでマッチした値。imp/click は商品コードを持たない）
       "dev": "sp", "pos": "center", "trg": "exit_back",
       "vid": "v_abc", "sesid": "s_def"
     }
@@ -128,20 +127,22 @@ CV イベントのみ追加フィールド:
 {
   "t": "cv",
   "orderId": "EC-20260811-0001",
+  "productCode": "PD-1001",          // ★ カートイン商品コード（差し込み変数から）。商品別レポートの唯一のキー
   "orderType": "first",              // 'first' | 'recurring'（既定は first のみ CV 計上）
   "planType": "subscription",        // 'subscription' | 'onetime'
   "revenue": 5400, "currency": "JPY",
-  "touch": { "cid": 501, "crid": 9002, "type": "click", "ts": 1786490000000,
-             "tok": "MjAyNjA4MTF8OTAwMnw5ZjJhLi4u" }   // pz_t 由来の署名
+  "touch": { "cid": 501, "crid": 9002, "type": "click", "ts": 1786490000000 }
 }
 ```
 
+- `productCode` が空、または未展開の差し込み変数（`{{` を含む）の場合は
+  `product_id = NULL` で記録する（商品別レポートには乗らないが、CV 件数・キャンペーン成果には計上される）
 - 応答は常に `204 No Content`（レスポンスボディ無しで最速）
-- サーバ側検証:
-  - `Origin` が `sites.allowed_hosts` / `cart_hosts` に含まれるか
-  - `ts` が ±10 分以内か（cv の `touch.ts` は CV ウィンドウ内か）
-  - `touch.tok` の HMAC 署名が `sites.signing_key` で検証できるか（別ドメイン CV の改ざん防止）
+- サーバ側検証: `Origin` が `sites.allowed_hosts` に含まれるか、`touch.ts` が CV ウィンドウ内か
 - `revenue` はクライアント値のため参考値である旨を管理画面に明記（厳密値が要る場合は S2S CV API）
+
+> `touch.tok`（HMAC 署名）は、カートが別ドメインの場合にのみ必要です。
+> プライムダイレクトは単一ドメイン構成のため、この節は付与しません（`09-cart-integration.md` 参照）。
 
 ### 1.3.1 別ドメインからの接触引き継ぎ（`pz_t`）
 
