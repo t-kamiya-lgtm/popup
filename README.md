@@ -18,6 +18,7 @@ EC サイトに 1 タグ設置するだけで、離脱防止・クーポン・SN
 
 | ドキュメント | 内容 |
 | --- | --- |
+| [docs/00-phase0-checklist.md](docs/00-phase0-checklist.md) | **👉 まずここから：着手前の調査手順書（記入シート付き）** |
 | [docs/01-requirements.md](docs/01-requirements.md) | 要件整理 / 用語定義 / スコープ |
 | [docs/02-architecture.md](docs/02-architecture.md) | システム全体構成 / 技術スタック / 配信フロー / スケール計画 |
 | [docs/03-data-model.md](docs/03-data-model.md) | データモデル / ER / 集計テーブル設計 |
@@ -78,9 +79,14 @@ EC サイトに 1 タグ設置するだけで、離脱防止・クーポン・SN
 
 ## 次のアクション
 
-**Phase 0（実装着手前）** — 残タスクは実質 2 つ
-→ [docs/09-cart-integration.md](docs/09-cart-integration.md) 1.1 のチェックリスト
+**Phase 0（実装着手前）の調査** — 具体的な作業手順と記入シートはこちら
+→ **[docs/00-phase0-checklist.md](docs/00-phase0-checklist.md)**
 
-1. **カート〜サンクスページのホスト名**（所要 1 分）
-   `www.primedirect.jp` のままか、途中で別ホストに変わるかで計測方式が決まる
-2. **差し込み変数の正確な変数名**（注文番号 / 金額 / 初回・継続の別）
+| 調査 | 内容 | 所要 |
+| --- | --- | --- |
+| A | カート〜注文完了ページの URL（**最重要**・これだけで着手可能） | 5 分 |
+| B | スマレジ・リピートの差し込み変数の名前 | 10 分 |
+| C | 商品ページの URL と商品コード | 3 分 |
+
+技術的な背景・判定後の実装方針は
+[docs/09-cart-integration.md](docs/09-cart-integration.md) を参照。
