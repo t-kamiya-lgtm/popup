@@ -5,20 +5,29 @@
 ### 1.1 配信設定取得
 
 ```
-GET https://cdn.popup.example.com/c/{sitePublicId}.json
-Cache-Control: public, max-age=60, stale-while-revalidate=600
+GET https://app.popup.example.com/c/{sitePublicId}.json
+Cache-Control: public, s-maxage=60, stale-while-revalidate=600
 ```
+
+Next.js の Route Handler で生成し、CDN でキャッシュする（別途 publish バッチは不要）。
 
 レスポンス:
 
 ```jsonc
 {
   "v": 128,                       // configVersion
-  "site": { "id": "SITE_XXXX", "tz": "Asia/Tokyo" },
-  "endpoints": { "decide": "https://edge.popup.example.com/d",
-                 "collect": "https://edge.popup.example.com/e" },
+  "site": {
+    "id": "SITE_XXXX", "tz": "Asia/Tokyo",
+    "cartHosts": ["cart.example.com"],   // このホストでは軽量モードで動作
+    "crossDomainCart": true
+  },
+  "sdkUrl": "https://cdn.popup.example.com/sdk.8f3a91.js",
+  "endpoints": { "collect": "https://app.popup.example.com/e" },
+  "tokens": {                     // pz_t 用の日次署名（vid/sid は含まない）
+    "9002": "MjAyNjA4MTF8OTAwMnw5ZjJhLi4u"
+  },
   "pageGroups": [
-    { "id": 11, "match": "prefix", "pattern": "/products/1001", "priority": 10 }
+    { "id": 11, "match": "prefix", "pattern": "/lp/teiki-a", "priority": 10 }
   ],
   "campaigns": [
     {
@@ -26,8 +35,11 @@ Cache-Control: public, max-age=60, stale-while-revalidate=600
       "priority": 100,
       "period": { "from": "2026-08-01T00:00:00+09:00", "to": null },
       "targets": {
-        "include": [{ "match": "prefix", "pattern": "/products/" }],
-        "exclude": [{ "match": "contains", "pattern": "/cart" }]
+        "productCodes": { "include": ["1001", "1002"], "exclude": [] },
+        "urls": {
+          "include": [{ "match": "prefix", "pattern": "/lp/" }],
+          "exclude": [{ "match": "contains", "pattern": "/cart" }]
+        }
       },
       "devices": ["pc", "sp"],
       "audience": { "visitorType": "any", "hours": null },
@@ -68,23 +80,21 @@ Cache-Control: public, max-age=60, stale-while-revalidate=600
 
 - **設定は全部まとめて 1 リクエスト**。ページ判定・条件判定はクライアントで行い、往復を増やさない
 - 個人情報・URL ごとの分岐を含まないため、CDN で全ユーザー共通キャッシュ可能
-- サイズが 100KB を超える規模になったらページグループ単位でシャーディングする
+- サイズが 100KB を超える規模になったらキャンペーン単位でシャーディングする
 
-### 1.2 配信決定（均等ローテーション）
+### 1.2 配信決定（サーバ API は不要）
 
-```
-GET /d?s={sitePublicId}&c={campaignId}&v={visitorId}&cv={configVersion}
-```
+当初案にあった `/d` エンドポイントは**廃止**しました。
+クリエイティブの割当は `sessionId` のハッシュによる決定論的ローテーションで
+クライアント側で完結します（`02-architecture.md` 3 章）。
 
-```jsonc
-{ "creativeId": 9002, "slot": "a1b2", "holdout": false }
-```
+これにより、
+- サーバ往復が消えて表示が速くなる
+- Redis が不要になる
+- アプリがダウンしても配信が継続する（CDN キャッシュのみで動作）
 
-- Edge の Redis で `INCR rr:{campaignId}` → `index = counter % activeCreativeCount`
-  （weight 指定時は累積重みテーブルで解決）
-- 同一 visitor には**セッション中は同じクリエイティブ**を返す（sticky, TTL 30 分）
-- `holdout` が true の場合、SDK は表示せず `holdout` イベントのみ送信
-- タイムアウト 300ms。失敗時は SDK が乱択にフォールバック（統計上ほぼ均等）
+holdout（対照群）の判定も同様に `hash(sessionId + ':holdout:' + campaignId) % 1000 < holdoutRate * 1000`
+で決定します。乱数ではなくハッシュを使うため、**同一セッションで判定がぶれません**。（統計上ほぼ均等）
 
 ### 1.3 計測
 
@@ -103,7 +113,8 @@ POST /e   Content-Type: application/json  (sendBeacon / keepalive fetch)
       "ts": 1786500000000,
       "cid": 501, "crid": 9002,
       "url": "https://shop.example.com/products/1001?utm_source=mail",
-      "pg": 11, "pc": "1001",           // pageGroupId / productCode
+      "pc": "1001",                     // productCode（タグから受領）
+      "pn": "定期コースA",               // productName（初回受信時に自動登録）
       "dev": "sp", "pos": "center", "trg": "exit_back",
       "vid": "v_abc", "sesid": "s_def"
     }
@@ -117,14 +128,31 @@ CV イベントのみ追加フィールド:
 {
   "t": "cv",
   "orderId": "EC-20260811-0001",
+  "orderType": "first",              // 'first' | 'recurring'（既定は first のみ CV 計上）
+  "planType": "subscription",        // 'subscription' | 'onetime'
   "revenue": 5400, "currency": "JPY",
-  "touch": { "cid": 501, "crid": 9002, "type": "click", "ts": 1786490000000 }
+  "touch": { "cid": 501, "crid": 9002, "type": "click", "ts": 1786490000000,
+             "tok": "MjAyNjA4MTF8OTAwMnw5ZjJhLi4u" }   // pz_t 由来の署名
 }
 ```
 
 - 応答は常に `204 No Content`（レスポンスボディ無しで最速）
-- サーバ側検証: `Origin` が `sites.allowed_hosts` に含まれるか、`ts` が ±10 分以内か
-- `revenue` はクライアント値のため、金額は参考値である旨を管理画面に明記（厳密値が要る場合は S2S CV API を利用）
+- サーバ側検証:
+  - `Origin` が `sites.allowed_hosts` / `cart_hosts` に含まれるか
+  - `ts` が ±10 分以内か（cv の `touch.ts` は CV ウィンドウ内か）
+  - `touch.tok` の HMAC 署名が `sites.signing_key` で検証できるか（別ドメイン CV の改ざん防止）
+- `revenue` はクライアント値のため参考値である旨を管理画面に明記（厳密値が要る場合は S2S CV API）
+
+### 1.3.1 別ドメインからの接触引き継ぎ（`pz_t`）
+
+バナークリック時、リンク先 URL に `pz_t` を付与して接触情報をカートドメインへ渡します。
+仕様は `09-cart-integration.md` 2 章（方式B）を参照。
+
+```
+GET https://cart.example.com/item/1001?pz_t=<base64url payload>
+```
+
+カート側 SDK は起動時にこれを検証・保存し、`history.replaceState` で URL から除去します。
 
 ### 1.4 S2S コンバージョン API（任意 / 精度重視オプション）
 
@@ -134,19 +162,27 @@ Authorization: Bearer {siteApiKey}
 ```
 
 ```jsonc
-{ "orderId": "EC-20260811-0001", "visitorId": "v_abc",
-  "occurredAt": "2026-08-11T12:00:00+09:00", "revenue": 5400 }
+{ "orderId": "EC-20260811-0001",
+  "pzToken": "eyJ2aWQiOi...",          // 注文時に引き継げた場合（最も正確）
+  "visitorId": "v_abc",                 // pzToken が無い場合の代替キー
+  "occurredAt": "2026-08-11T12:00:00+09:00",
+  "orderType": "first", "revenue": 5400 }
 ```
 
-サーバ側で `visitorId` の直近接触を検索してアトリビューションを付与。
-ブラウザ CV と `orderId` で重複排除する。
+サーバ側で `pzToken` → `visitorId` の順に接触を検索してアトリビューションを付与。
+ブラウザ CV と `orderId` で重複排除する（S2S を正とする）。
+スマレジ・リピートのサンクスページに JS タグを設置できない場合の主経路になります。
 
 ## 2. 管理 API（認証必須 / REST）
 
 | メソッド | パス | 概要 |
 | --- | --- | --- |
 | POST | `/api/v1/auth/login` | ログイン（Cookie セッション） |
+| GET | `/api/v1/accounts` | 所属アカウント一覧（切替用） |
+| POST | `/api/v1/accounts/{id}/members` | メンバー招待 |
+| GET | `/api/v1/accounts/{id}/usage` | プラン・使用量（imp クォータ） |
 | GET/POST | `/api/v1/sites` | サイト一覧 / 作成 |
+| GET/PATCH | `/api/v1/products` | 商品一覧（自動登録された商品コード）/ 名称編集 |
 | GET | `/api/v1/sites/{id}/tag` | 設置タグのスニペット取得 |
 | GET/POST/PATCH/DELETE | `/api/v1/campaigns` | キャンペーン CRUD |
 | POST | `/api/v1/campaigns/{id}/publish` | 設定を CDN へ publish |
@@ -156,7 +192,8 @@ Authorization: Bearer {siteApiKey}
 | GET | `/api/v1/assets/{id}` | 最適化状況・variant 一覧 |
 | GET/POST/PATCH/DELETE | `/api/v1/page-groups` | ページグループ CRUD |
 | GET | `/api/v1/reports/summary` | 期間サマリ |
-| GET | `/api/v1/reports/by-page` | ページ（商品）別 |
+| GET | `/api/v1/reports/by-product` | 商品別 |
+| GET | `/api/v1/reports/by-page` | ページグループ別（商品コードなしのページ） |
 | GET | `/api/v1/reports/by-creative` | クリエイティブ別 |
 | GET | `/api/v1/reports/timeseries` | 日次推移 |
 | GET | `/api/v1/reports/export.csv` | CSV エクスポート |
@@ -167,10 +204,13 @@ Authorization: Bearer {siteApiKey}
 ?siteId=1
 &from=2026-08-01&to=2026-08-11        // 期間指定
 &campaignId=501                        // 任意
+&productId=11                          // 任意
 &pageGroupId=11                        // 任意
 &creativeId=9002                       // 任意
 &device=pc|sp|tablet                   // 任意
-&groupBy=date|page|creative|campaign|device
+&orderType=first|all                   // 既定 first（定期の継続注文を除外）
+&compare=previous                      // 前期間比較
+&groupBy=date|product|page|creative|campaign|device
 ```
 
 レスポンス例（`by-creative`）:

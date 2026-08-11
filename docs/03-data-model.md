@@ -1,11 +1,18 @@
 # 03. データモデル
 
+> **DB は PostgreSQL 一本**（月間 1 万 PV 規模のため）。
+> マスタ・イベント・集計をすべて同一 DB に置き、月間 100 万 PV まではこの構成で運用します。
+> スケール時の移行方針は `02-architecture.md` 9 章。
+> テナント分離（RLS）は `10-multitenancy.md`。
+
 ## 1. ER 概要
 
 ```mermaid
 erDiagram
-  ACCOUNT ||--o{ USER : has
+  ACCOUNT ||--o{ MEMBERSHIP : has
+  USER ||--o{ MEMBERSHIP : has
   ACCOUNT ||--o{ SITE : has
+  SITE ||--o{ PRODUCT : has
   SITE ||--o{ PAGE_GROUP : has
   SITE ||--o{ CAMPAIGN : has
   SITE ||--o{ CONFIG_VERSION : has
@@ -29,13 +36,28 @@ CREATE TABLE accounts (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE accounts_plan (
+  account_id   BIGINT PRIMARY KEY REFERENCES accounts(id),
+  plan_code    TEXT NOT NULL REFERENCES plans(code),
+  status       TEXT NOT NULL CHECK (status IN ('trial','active','past_due','canceled')),
+  trial_ends_at TIMESTAMPTZ
+);
+
+-- User は複数アカウントに所属できる（代理店運用に対応）
 CREATE TABLE users (
-  id           BIGSERIAL PRIMARY KEY,
-  account_id   BIGINT NOT NULL REFERENCES accounts(id),
-  email        CITEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  role         TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  id            BIGSERIAL PRIMARY KEY,
+  email         CITEXT NOT NULL UNIQUE,
+  password_hash TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE memberships (
+  id         BIGSERIAL PRIMARY KEY,
+  account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
+  accepted_at TIMESTAMPTZ,
+  UNIQUE (account_id, user_id)
 );
 ```
 
@@ -45,27 +67,47 @@ CREATE TABLE users (
 CREATE TABLE sites (
   id            BIGSERIAL PRIMARY KEY,
   account_id    BIGINT NOT NULL REFERENCES accounts(id),
-  public_id     TEXT NOT NULL UNIQUE,        -- タグに埋め込む SITE_XXXX
+  public_id     TEXT NOT NULL UNIQUE,        -- タグに埋め込む SITE_XXXX（26桁ランダム）
   name          TEXT NOT NULL,
-  allowed_hosts TEXT[] NOT NULL DEFAULT '{}',-- 配信を許可するホスト名（なりすまし防止）
+  allowed_hosts TEXT[] NOT NULL DEFAULT '{}',-- 配信/計測を許可するホスト名（なりすまし防止）
+  cart_hosts    TEXT[] NOT NULL DEFAULT '{}',-- スマレジ・リピート側のホスト名
+  cross_domain_cart BOOLEAN NOT NULL DEFAULT false, -- 別ドメインならビュースルーCV列を隠す
+  signing_key   BYTEA NOT NULL,              -- pz_t 署名用（サーバのみ保持）
   timezone      TEXT NOT NULL DEFAULT 'Asia/Tokyo',
   cv_click_window_days INT NOT NULL DEFAULT 7,
   cv_view_window_days  INT NOT NULL DEFAULT 1,
+  cv_count_recurring   BOOLEAN NOT NULL DEFAULT false, -- 定期の継続注文をCVに含めるか
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
-### page_groups（レポートの「商品 / ページ」集計単位）
+### products（レポートの主集計軸）
 
-URL をそのまま集計すると `?utm_source=` 等でカーディナリティが爆発するため、
-**正規化 URL** と **ページグループ**の 2 階層で持つ。
+商品コードはタグから確実に受け取れるため、**URL パターンによる分類は不要**。
+初めて受信した商品コードは自動で upsert し、名称は管理画面で編集できる。
+
+```sql
+CREATE TABLE products (
+  id           BIGSERIAL PRIMARY KEY,
+  site_id      BIGINT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  product_code TEXT NOT NULL,               -- カート側の商品コード
+  name         TEXT NOT NULL DEFAULT '',    -- タグ受信値 or 管理画面で編集
+  archived     BOOLEAN NOT NULL DEFAULT false,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (site_id, product_code)
+);
+```
+
+### page_groups（商品ページ以外の補助的な集計単位）
+
+LP・記事ページなど商品コードを持たないページを分類するために残す。
 
 ```sql
 CREATE TABLE page_groups (
   id         BIGSERIAL PRIMARY KEY,
-  site_id    BIGINT NOT NULL REFERENCES sites(id),
-  name       TEXT NOT NULL,                -- 例: 「商品A 詳細ページ」
-  product_code TEXT,                       -- 基幹/EC 側の商品コード（任意）
+  site_id    BIGINT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,                -- 例: 「定期LP（A案）」
   match_type TEXT NOT NULL CHECK (match_type IN ('exact','prefix','contains','regex')),
   pattern    TEXT NOT NULL,
   priority   INT NOT NULL DEFAULT 100,     -- 小さいほど優先
@@ -74,8 +116,8 @@ CREATE TABLE page_groups (
 CREATE INDEX ON page_groups (site_id, priority);
 ```
 
-- タグ側で `data-product-code` / `pqz.push(['page', {productCode}])` を渡せる場合はそれを優先採用
-- 渡せない場合は上記パターンマッチで分類（未分類は「その他」に集約）
+分類の優先順位: `productCode` があればそれを採用 → なければ page_group にマッチ →
+どちらも無ければ「その他」に集約。
 
 ### campaigns
 
@@ -136,15 +178,21 @@ CREATE TABLE campaigns (
 
 ### campaign_targets（配信対象ページ）
 
+商品コード指定と URL ルール指定の両方に対応する。
+
 ```sql
 CREATE TABLE campaign_targets (
   id          BIGSERIAL PRIMARY KEY,
   campaign_id BIGINT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   kind        TEXT NOT NULL CHECK (kind IN ('include','exclude')),
-  match_type  TEXT NOT NULL CHECK (match_type IN ('exact','prefix','contains','regex')),
-  pattern     TEXT NOT NULL
+  target_type TEXT NOT NULL CHECK (target_type IN ('product_code','url')),
+  match_type  TEXT CHECK (match_type IN ('exact','prefix','contains','regex')), -- url のみ
+  pattern     TEXT NOT NULL   -- product_code のときは商品コードそのもの
 );
 ```
+
+判定順序: `exclude` に 1 つでもマッチしたら配信しない → `include` が空なら全ページ対象、
+1 件以上あればいずれかにマッチした場合のみ配信。
 
 ### assets / asset_variants（画像の自動最適化）
 
@@ -208,61 +256,77 @@ CREATE TABLE config_versions (
 );
 ```
 
-## 3. イベント（列指向 DB / 生ログ）
+## 3. イベント（PostgreSQL）
+
+月間 2,000 件程度のため、専用の分析 DB は使わず PostgreSQL に格納する。
+将来の移行を容易にするため、初めから月次パーティションで作成しておく。
 
 ```sql
--- ClickHouse イメージ
 CREATE TABLE events (
-  event_time     DateTime64(3),
-  site_id        UInt64,
-  event_type     Enum8('imp'=1,'click'=2,'cv'=3,'close'=4,'holdout'=5),
-  campaign_id    UInt64,
-  creative_id    UInt64,
-  config_version UInt64,
-  page_group_id  UInt64,
-  page_url_hash  UInt64,
-  page_path      String,
-  product_code   String,
-  device         Enum8('pc'=1,'sp'=2,'tablet'=3),
-  visitor_id     String,        -- 1st-party ID（サイト単位・クロスサイト追跡なし）
-  session_id     String,
-  trigger_type   LowCardinality(String),
-  position       LowCardinality(String),
+  id             BIGSERIAL,
+  event_id       UUID NOT NULL,            -- 冪等キー（クライアント生成）
+  occurred_at    TIMESTAMPTZ NOT NULL,
+  received_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  account_id     BIGINT NOT NULL,
+  site_id        BIGINT NOT NULL,
+  event_type     TEXT NOT NULL CHECK (event_type IN ('imp','click','cv','close','holdout')),
+  campaign_id    BIGINT,
+  creative_id    BIGINT,
+  config_version BIGINT,
+  product_id     BIGINT,                   -- products.id
+  page_group_id  BIGINT,
+  page_path      TEXT,
+  device         TEXT CHECK (device IN ('pc','sp','tablet')),
+  visitor_id     TEXT,                     -- 1st-party ID（サイト単位・クロスサイト追跡なし）
+  session_id     TEXT,
+  trigger_type   TEXT,
+  position       TEXT,
   -- CV 用
-  order_id       String,
-  revenue        Decimal64(2),
-  attribution    Enum8('none'=0,'click'=1,'view'=2),
-  latency_sec    UInt32,        -- 接触から CV までの秒数
-  event_id       UUID           -- 冪等キー
-) ENGINE = MergeTree
-ORDER BY (site_id, event_time, campaign_id, creative_id);
+  order_id       TEXT,
+  order_type     TEXT CHECK (order_type IN ('first','recurring')),
+  plan_type      TEXT CHECK (plan_type IN ('subscription','onetime')),
+  revenue        NUMERIC(12,2),
+  attribution    TEXT CHECK (attribution IN ('none','click','view')),
+  latency_sec    INT,                      -- 接触から CV までの秒数
+  is_bot         BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY (id, occurred_at)
+) PARTITION BY RANGE (occurred_at);
+
+CREATE UNIQUE INDEX ON events (event_id, occurred_at);
+CREATE UNIQUE INDEX events_cv_order ON events (site_id, order_id)
+  WHERE event_type = 'cv' AND order_id IS NOT NULL;
+CREATE INDEX ON events (site_id, occurred_at DESC);
 ```
 
 - `event_id` で重複排除（ネットワーク再送・ページ再読込対策）
-- CV は `site_id + order_id` でも一意制約相当の排除を行う
+- CV は部分ユニークインデックスで `site_id + order_id` の重複を**DB レベルで**排除
+- パーティションは月次。13 ヶ月経過したパーティションを `DROP` して保持期限を実装
 
 ## 4. ロールアップ（レポート用）
 
-レポートは常にこのテーブルを参照する（生イベントは調査用途のみ）。
+レポートは常にこのテーブルを参照する（生イベントを直接クエリするコードは書かない。
+将来イベントストアを差し替えた際にレポート側を修正せずに済むため）。
 
 ```sql
 CREATE TABLE stats_daily (
-  date           Date,
-  site_id        UInt64,
-  campaign_id    UInt64,
-  creative_id    UInt64,
-  page_group_id  UInt64,
-  device         Enum8('pc'=1,'sp'=2,'tablet'=3),
-  imps           UInt64,
-  clicks         UInt64,
-  closes         UInt64,
-  cv_click       UInt64,
-  cv_view        UInt64,
-  revenue        Decimal64(2),
-  holdout_imps   UInt64,   -- 対照群に「出さなかった」回数
-  holdout_cv     UInt64
-) ENGINE = SummingMergeTree
-ORDER BY (site_id, date, campaign_id, creative_id, page_group_id, device);
+  date           DATE NOT NULL,
+  account_id     BIGINT NOT NULL,
+  site_id        BIGINT NOT NULL,
+  campaign_id    BIGINT NOT NULL DEFAULT 0,
+  creative_id    BIGINT NOT NULL DEFAULT 0,
+  product_id     BIGINT NOT NULL DEFAULT 0,
+  page_group_id  BIGINT NOT NULL DEFAULT 0,
+  device         TEXT NOT NULL,
+  imps           BIGINT NOT NULL DEFAULT 0,
+  clicks         BIGINT NOT NULL DEFAULT 0,
+  closes         BIGINT NOT NULL DEFAULT 0,
+  cv_click       BIGINT NOT NULL DEFAULT 0,
+  cv_view        BIGINT NOT NULL DEFAULT 0,
+  revenue        NUMERIC(14,2) NOT NULL DEFAULT 0,
+  holdout_sessions BIGINT NOT NULL DEFAULT 0,  -- 対照群として「出さなかった」回数
+  holdout_cv     BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (site_id, date, campaign_id, creative_id, product_id, page_group_id, device)
+);
 ```
 
 管理画面の集計軸は、このテーブルの GROUP BY だけで全て満たせる:
@@ -270,10 +334,14 @@ ORDER BY (site_id, date, campaign_id, creative_id, page_group_id, device);
 | 画面 | GROUP BY |
 | --- | --- |
 | 期間サマリ | date |
-| ページ（商品）別 | page_group_id |
+| 商品別 | product_id |
+| ページ別（商品以外） | page_group_id |
 | クリエイティブ別 | creative_id |
 | デバイス別 | device |
 | キャンペーン別 | campaign_id |
+
+集計は日次 Cron で `events` から `INSERT ... ON CONFLICT DO UPDATE`。
+CV は最大 7 日遅れて到着するため、**毎回過去 8 日分を再集計**する。
 
 ## 5. 保持ポリシー
 

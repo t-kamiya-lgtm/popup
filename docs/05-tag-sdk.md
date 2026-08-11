@@ -28,18 +28,35 @@
 - 共通タグより**前**に置いても動作する（コマンドキュー方式）
 - `orderId` は重複計測防止に必須。同一 `orderId` は 1 CV として扱う
 
-### 1.3 商品コードの明示（任意・推奨）
+### 1.3 商品コードタグ（商品ページ・必須）
 
-URL パターンで商品ページを判定できない EC カートの場合、商品ページに追記:
+商品コードはタグから渡せることが確定しているため、**これを必須の設置項目**とします。
 
 ```html
 <script>
   window.pqz = window.pqz || [];
-  pqz.push(['page', { productCode: '{{商品コード}}', pageType: 'product' }]);
+  pqz.push(['page', {
+    productCode: '{{商品コード}}',
+    productName: '{{商品名}}',
+    pageType   : 'product'
+  }]);
 </script>
 ```
 
-これを入れると、レポートの「商品 - ページ別」がカート側のマスタと確実に一致する。
+- レポートの商品別集計、キャンペーンの商品指定ターゲティングの両方でこの値を使う
+- 初めて受信した商品コードは自動で商品マスタに登録される（手動メンテ不要）
+- URL ルールで商品を推測する必要がなくなり、設定ミス起因の集計ズレが構造的に消える
+
+### 1.4 SDK の動作モード
+
+同じ共通タグを設置しても、ホスト名に応じて動作を変えます。
+
+| モード | 適用ホスト | 動作 |
+| --- | --- | --- |
+| `full` | 顧客サイト（LP・商品ページ） | トリガー監視・描画・計測すべて |
+| `cart` | `site.cartHosts` に一致（スマレジ・リピート側） | `pz_t` 受け取り + CV 送信のみ。**描画しない・`pushState` しない** |
+
+カートモードではポップアップを一切表示せず、購入フォームの挙動にも干渉しません。
 
 ## 2. SDK 構成
 
@@ -88,6 +105,7 @@ window.addEventListener('popstate', (e) => {
 | URL が変わらないか | `pushState(…, location.href)` で URL は不変 |
 | 戻るが効かなくなる（バックボタントラップ） | **1 回だけ**トラップし、ポップアップ表示後は積み直さない。× を押すか 1 回目のトリガー後は通常の戻る動作を許可する（ダークパターン回避 / ブラウザのペナルティ回避） |
 | SPA サイトで pushState が競合 | 設定に `disableBackTrigger` を用意し、SPA サイトでは無効化できるようにする |
+| カートページで購入フォームを壊す | **カートモードでは `pushState` を一切行わない**（強制無効） |
 | iOS Safari のスワイプバック | 同様に popstate が発火するため動作する |
 
 ### 3.2 滞在時間（`dwell`）
@@ -122,14 +140,16 @@ document.addEventListener('mouseout', (e) => {
 flowchart TD
   A[設定JSON取得] --> B{ホスト名が許可リストに含まれる?}
   B -- No --> X[終了]
-  B -- Yes --> C[URL 正規化 → pageGroup 判定]
+  B -- Yes --> B2{cartHosts に一致?}
+  B2 -- Yes --> CM["カートモード<br/>pz_t 受領 + CV 送信のみ"]
+  B2 -- No --> C["商品コード確定（pqz page コマンド）<br/>なければ pageGroup 判定"]
   C --> D[配信期間 / デバイス / オーディエンス 判定]
-  D --> E[targets include / exclude 判定]
+  D --> E[targets 商品コード / URL の include・exclude 判定]
   E --> F[フリークエンシー判定 localStorage]
   F --> G{候補キャンペーンあり?}
   G -- No --> X
   G -- Yes --> H[priority 最上位を 1 件選択]
-  H --> I["/d でクリエイティブ割当（sticky）"]
+  H --> I["sessionId ハッシュでクリエイティブ決定<br/>（サーバ往復なし）"]
   I --> J{holdout?}
   J -- Yes --> K[holdout イベント送信・非表示]
   J -- No --> L[画像プリロード + decode]
@@ -137,6 +157,11 @@ flowchart TD
   M --> N[発火 → Shadow DOM に描画]
   N --> O[IntersectionObserver で可視確認 → imp 送信]
 ```
+
+商品コードタグ (`pqz.push(['page', ...])`) は共通タグより後に実行される場合があるため、
+**商品コードの受領を最大 500ms 待ってから判定を開始**します
+（`pageType: 'product'` のページで商品コードが未着のまま判定すると取りこぼすため）。
+待機中もトリガー監視は開始しておき、判定完了前に発火した場合は判定後に描画します。
 
 **画像はトリガー発火前にプリロードして `img.decode()` まで済ませておく**。
 これにより発火から描画まで 100ms 以内、かつ「一瞬白いまま出る」を防ぐ。
@@ -180,6 +205,11 @@ flowchart TD
 | `pz.fq.{campaignId}` | 表示回数・最終表示時刻・クローズ日時 | localStorage |
 | `pz.touch` | 直近の接触（click / view）配列 | localStorage / 最大 7 日・10 件 |
 | `pz.q` | 送信失敗イベントの再送キュー | localStorage / 最大 24 時間 |
+
+> **オリジンごとに分離される点に注意**。顧客ドメインで保存した `pz.touch` は
+> カートドメインからは読めません。そのためクリック時にリンク先 URL へ `pz_t` を付与し、
+> カート側 SDK が受け取って**カートオリジンの localStorage に保存し直します**
+> （`09-cart-integration.md` 2 章）。
 
 - クロスサイトトラッキングは行わない（3rd-party Cookie 不使用）
 - ITP により localStorage が 7 日で消える環境があるため、CV ウィンドウの実効値は 7 日が上限。
