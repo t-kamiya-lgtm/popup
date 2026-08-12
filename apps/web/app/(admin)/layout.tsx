@@ -19,6 +19,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       >
         <nav style={{ display: "flex", gap: 16 }}>
           <a href="/campaigns">キャンペーン</a>
+          <a href="/order-api">受注API連携</a>
         </nav>
         <LogoutButton />
       </header>

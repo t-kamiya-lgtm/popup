@@ -35,12 +35,27 @@ DB 反映まで一通り確認済み（実装時に見つけたバグ 1 件を�
   `apps/web/public/uploads/` に保存 — DB スキーマは同じなので、後で
   オブジェクトストレージに差し替える際は `lib/assets.ts` だけ変更すればよい設計。
   アップロード → 保存 → リロード後の永続化まで実ブラウザで確認済み
+- 受注API OAuth2 連携（`docs/09-cart-integration.md` 3.5、`apps/web/lib/order-api.ts`）:
+  管理画面「受注API連携」でクライアントID/シークレットを登録（AES-256-GCM で
+  暗号化保存）→ `authorize.php` へ誘導 → callback で `code` を
+  トークンに交換（`grant_type=client_credentials`、実機未検証につき要確認と
+  コード内に明記）→ 受注API `orders/search` を呼んで `order_cnt` から
+  初回/継続を判定し `events.order_type` を更新 → 期限 10 日前を切ったら
+  `refresh_token` で自動更新。本番は Cron が呼ぶ想定の同期処理
+  （`docs/04-api.md` 1.5.3）を、Phase 1 は管理画面の「今すぐ同期」ボタンから
+  同じ関数を呼べるようにして代替。受注APIを一切連携しなくても配信・計測・
+  商品別レポートは動作する任意機能（`docs/06-admin.md` 6.5）。
+  クレデンシャル登録・authorize リダイレクト・callback・トークン交換・
+  同期・`refresh_token` 更新・連携解除までをモックの OAuth/受注API サーバー
+  相手に実ブラウザ（Playwright）で確認済み（実装時に見つけたバグ 1 件を
+  含め修正済み — `occurred_at` を経由した `UPDATE` が JS `Date` の精度落ちで
+  0 件ヒットしていた）
 
 **未実装（Phase 1 残り・Phase 2）:**
 - 実績レポート UI（imp/click/CV、ページ・商品別、クリエイティブ別）
-- 受注API OAuth 連携（`docs/09-cart-integration.md` 3.5〜3.7）
 - 日次集計バッチ（`stats_daily`）、対照群（holdout）のレポート反映
 - サイト切り替え（複数サイト運用時の管理画面 UI。現状は最初の1件のみ表示）
+- 受注API 同期の Cron 化（現状は管理画面からの手動トリガーのみ）
 
 ### ローカルで動かす
 
