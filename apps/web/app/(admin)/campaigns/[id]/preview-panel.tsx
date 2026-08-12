@@ -13,14 +13,25 @@ interface Props {
   closeButton: boolean;
 }
 
-// A scaled-down "desktop" frame, not the full 1440px docs/06-admin.md
-// mentions for a dedicated preview screen — this panel sits inline next to
-// the edit form, so it trades exact-size accuracy for fitting on screen.
+// True-to-life viewport sizes, not the smaller box this panel used to use.
+// PC creatives are capped at a fixed 380px (see POSITION_STYLES/maxWidth in
+// packages/sdk/src/render.ts) regardless of screen size, so shrinking the
+// *frame* below a real desktop width — as the previous 600px version did —
+// made the banner look proportionally huge compared to production (a real
+// user caught this by comparing against a competitor's popup). SP already
+// matches a real phone width, so it didn't have this problem.
 const FRAME_SIZE: Record<Device, { width: number; height: number }> = {
   sp: { width: 375, height: 667 },
-  pc: { width: 600, height: 400 },
-  tablet: { width: 500, height: 400 },
+  pc: { width: 1280, height: 800 },
+  tablet: { width: 768, height: 1024 },
 };
+
+// The frame above is rendered at true size (so container-query `cqw` units
+// inside packages/sdk/src/render.ts compute the same percentages a real
+// browser would) and then visually shrunk with a CSS transform so it still
+// fits inline next to the edit form — transforms don't affect layout size,
+// so this doesn't change what the container query sees.
+const DISPLAY_SCALE: Record<Device, number> = { sp: 1, pc: 0.375, tablet: 0.45 };
 
 /**
  * Renders through the exact same `renderPopup` the live SDK uses
@@ -57,22 +68,32 @@ export function PreviewPanel(props: Props) {
   }, [props.creative, props.device, props.positionPc, props.positionSp, props.overlay, props.closeButton]);
 
   const frame = FRAME_SIZE[props.device];
+  const scale = DISPLAY_SCALE[props.device];
 
   return (
     <div
-      ref={containerRef}
-      style={
-        {
-          width: frame.width,
-          height: frame.height,
-          position: "relative",
-          containerType: "inline-size",
-          overflow: "hidden",
-          border: "1px solid #ccc",
-          borderRadius: 8,
-          background: "#f2f2f2",
-        } as React.CSSProperties
-      }
-    />
+      style={{
+        width: frame.width * scale,
+        height: frame.height * scale,
+        overflow: "hidden",
+        border: "1px solid #ccc",
+        borderRadius: 8,
+      }}
+    >
+      <div
+        ref={containerRef}
+        style={
+          {
+            width: frame.width,
+            height: frame.height,
+            position: "relative",
+            containerType: "inline-size",
+            background: "#f2f2f2",
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+          } as React.CSSProperties
+        }
+      />
+    </div>
   );
 }
