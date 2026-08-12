@@ -182,18 +182,39 @@ Authorization: Bearer {siteApiKey}
 サンクスページに JS タグを設置できない顧客カート向けの経路として設計を保持します
 （プライムダイレクトでは 1.5 節の方式を使うため、これは未使用）。
 
-### 1.5 受注API 同期（内部バッチ・初回/継続判定のみに使用）
+### 1.5 受注API 連携（OAuth2・初回/継続判定のみに使用）
 
-1.4 節が「相手からこちらへ push してもらう」方式なのに対し、これは
-**こちらから相手の受注API を pull しにいく**方式です。プライムダイレクトが
-スマレジEC・受注API を提供しているため利用しますが、**商品コード・金額は
-サンクスページのタグから即時取得済み**のため、このバッチの役割は
-**`order_type`（初回/継続）の判定に限定**されます（`09-cart-integration.md` 3〜4 章）。
+> **実装するかどうかは検討中**（`09-cart-integration.md` 3.7 節）。
+> 商品コード・金額はサンクスページのタグから即時取得済みのため、
+> この連携が無くても配信・計測・商品別レポートは正常に動作します。
+> 実装する場合は以下の設計になります。
+
+#### 1.5.1 OAuth 連携用エンドポイント（管理 API・認証必須）
+
+| メソッド | パス | 概要 |
+| --- | --- | --- |
+| POST | `/api/v1/sites/{id}/order-api/credentials` | `client_id` / `client_secret` を登録（暗号化して保存） |
+| GET | `/api/v1/sites/{id}/order-api/authorize-url` | `authorize.php` への誘導 URL を生成（`state` を発行） |
+| GET | `/api/v1/sites/{id}/order-api/status` | 連携状態（`not_connected` / `connected` / `expired` / `error`）を返す |
+| POST | `/api/v1/sites/{id}/order-api/disconnect` | トークンを破棄し未連携状態に戻す |
+
+#### 1.5.2 OAuth callback（公開エンドポイント・スマレジEC からのリダイレクトを受ける）
 
 ```
-[内部バッチ: サーバ側 Cron ジョブ]
+GET /api/v1/sites/{id}/order-api/callback?code=xxxxx&state=zzzzz
+```
+
+- `state` が 1.5.1 で発行したものと一致するか検証（CSRF 対策）
+- 一致すれば `code` を `token_url` に POST して `access_token` / `refresh_token` を取得し、
+  `site_order_api_connections` に暗号化して保存
+- 完了後、管理画面の連携完了画面へリダイレクト
+
+#### 1.5.3 同期バッチ（内部 Cron ジョブ・こちらがスマレジEC API を呼び出す）
+
+```
+[内部バッチ]
 GET/POST https://{カートのAPIドメイン}/api/v2/orders/search
-Authorization: Bearer {サイトごとに登録した access_token}
+Authorization: Bearer {サイトごとに保存した access_token}
 
 body: {
   "search_options": { "order_id_from": "{注文番号}", "order_id_to": "{注文番号}" },
@@ -203,19 +224,18 @@ body: {
 
 処理内容:
 
-1. `sites.orderApi`（`accessToken` / `baseUrl`）を site ごとに読む
-2. `order_type_status='pending'` な `events`（cv）を数分おきにまとめて取得
-3. `{注文番号}` タグの値と一致する `order.order_id`（または `ec_order_id`。
-   `09-cart-integration.md` 3.5 節で確定）を受注API から検索
-4. `order.order_cnt` から `order_type` を決定し、`events` を `order_type_status='confirmed'` に更新
+1. `order_type_status='pending'` な `events`（cv）を数分おきにまとめて取得
+2. `{注文番号}` タグの値と一致する `order.order_id`（または `ec_order_id`。
+   `09-cart-integration.md` 3.6 節で確定）を受注API から検索
+3. `order.order_cnt` から `order_type` を決定し、`events` を `order_type_status='confirmed'` に更新
+4. `access_token` の `expires_at` が 10 日以内に迫っていれば `refresh_token` で更新
 5. 8 日以上 `pending` のまま残る CV は `order_type='unknown'` として扱う
-   （商品別・売上レポートには**既に計上済み**のため、この判定の遅延は
-   「初回のみ」フィルタの精度にのみ影響する）
+6. トークンが失効・エラーの場合は `site_order_api_connections.status='error'` にし、
+   管理画面にアラート表示（再連携を促す）
 
 このエンドポイントは管理 API・計測 API のどちらとも異なり、**顧客のカート API を
-こちらが呼び出す内部ジョブ**である点に注意してください（顧客からのリクエストを
-受ける形ではありません）。このバッチが停止しても、**商品別レポート・売上・CV数は
-正常に動作し続けます**（影響は初回/継続の区別のみ）。
+こちらが呼び出す内部ジョブ**である点に注意してください。このバッチが停止しても、
+**商品別レポート・売上・CV数は正常に動作し続けます**（影響は初回/継続の区別のみ）。
 
 ## 2. 管理 API（認証必須 / REST）
 

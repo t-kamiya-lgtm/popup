@@ -81,6 +81,37 @@ CREATE TABLE sites (
 );
 ```
 
+### site_order_api_connections（受注API の OAuth2 連携。初回/継続判定のみに使用）
+
+`09-cart-integration.md` 3.5〜3.7 節の判断（実装するか、Phase 2 に回すか）が
+出るまでは、`sites` 本体には含めず別テーブルに分離しておく（未使用でも困らない設計）。
+
+```sql
+CREATE TABLE site_order_api_connections (
+  site_id        BIGINT PRIMARY KEY REFERENCES sites(id) ON DELETE CASCADE,
+  authorize_url  TEXT NOT NULL,   -- 例: https://www.primedirect.jp/api/oauth/authorize.php
+  token_url      TEXT NOT NULL,   -- 例: https://www.primedirect.jp/api/oauth/token.php
+  api_base_url   TEXT NOT NULL,   -- 例: https://www.primedirect.jp/api/v2/orders
+  client_id      TEXT,
+  client_secret_encrypted   BYTEA,   -- アプリ暗号鍵で暗号化。管理画面には再表示しない
+  access_token_encrypted    BYTEA,
+  refresh_token_encrypted   BYTEA,
+  token_expires_at TIMESTAMPTZ,      -- 発行から100日。10日前を目安に自動更新
+  order_id_field TEXT CHECK (order_id_field IN ('order_id','ec_order_id')), -- 3.6節#1の確認結果
+  status         TEXT NOT NULL CHECK (status IN ('not_connected','connected','expired','error'))
+                 DEFAULT 'not_connected',
+  last_synced_at TIMESTAMPTZ,
+  last_error     TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+- `client_secret` / `access_token` / `refresh_token` はアプリケーション層で暗号化してから
+  格納する（DB ダンプが漏れても平文が残らないようにする）
+- OAuth の callback URL は `https://{本ツールのドメイン}/api/v1/sites/{site_id}/order-api/callback`
+  のようにサイトごとに一意にし、`state` パラメータで CSRF 対策を行う（`04-api.md` 参照）
+- `status='expired'` になったら管理画面にアラートを出し、再連携を促す
+
 ### products（CV・売上レポートの主集計軸）
 
 > **重要な設計変更**（2026-08 確認結果を反映）:
