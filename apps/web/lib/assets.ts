@@ -1,5 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import sharp from "sharp";
 import type { PoolClient } from "pg";
 import type { ImageVariant } from "@popup/shared";
@@ -12,12 +10,48 @@ const MAX_DIMENSION = 4000; // docs/06-admin.md 3.1: 原本は 4000px まで
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 // docs/06-admin.md 3.1 specifies signed-URL-direct-to-storage + a separate
-// optimization worker + CDN. Phase 1 has neither an object store nor a job
-// queue, so this pipeline runs synchronously in the request and writes to
-// apps/web/public/uploads/ instead — same assets/asset_variants schema and
-// same output shape (resize, format fallback), so swapping in real storage
-// later only touches this file, not the DB model or the admin UI.
+// optimization worker + CDN. Phase 1 has no job queue, so this pipeline
+// still runs synchronously in the request — but it uploads the generated
+// variants to a Supabase Storage bucket rather than the local filesystem.
+// (An earlier version wrote to apps/web/public/uploads/, which worked
+// locally but broke in production: Vercel's serverless functions run on a
+// read-only filesystem outside /tmp, so every upload failed there.) Same
+// assets/asset_variants schema either way, so switching storage backends
+// again later only touches this file.
 const TARGET_WIDTH: Record<"pc" | "sp", number> = { pc: 380, sp: 320 };
+const BUCKET = "assets";
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is not set`);
+  return value;
+}
+
+async function uploadToStorage(objectPath: string, buffer: Buffer, contentType: string): Promise<string> {
+  const supabaseUrl = requireEnv("SUPABASE_URL").replace(/\/$/, "");
+  const serviceKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${BUCKET}/${objectPath}`;
+
+  const res = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceKey}`,
+      apikey: serviceKey,
+      "Content-Type": contentType,
+      "x-upsert": "true",
+    },
+    body: new Uint8Array(buffer),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Supabase Storage upload failed: ${res.status} ${text}`.slice(0, 500));
+  }
+
+  // Bucket is public (docs/06-admin.md 3 — served directly to the CV tag's
+  // <img> and to visitors), so the public object URL is stable and
+  // predictable without a signed-URL round trip.
+  return `${supabaseUrl}/storage/v1/object/public/${BUCKET}/${objectPath}`;
+}
 
 export interface UploadedAsset {
   assetId: number;
@@ -56,12 +90,9 @@ export async function processAndStoreUpload(
   );
   const assetId = Number(asset.id);
 
-  const dir = path.join(process.cwd(), "public", "uploads", String(siteId), String(assetId));
-  await mkdir(dir, { recursive: true });
-
   const images = {} as { pc: ImageVariant; sp: ImageVariant };
   for (const purpose of ["pc", "sp"] as const) {
-    images[purpose] = await buildVariant(client, assetId, siteId, dir, purpose, original, meta.hasAlpha === true);
+    images[purpose] = await buildVariant(client, assetId, siteId, purpose, original, meta.hasAlpha === true);
   }
 
   await client.query(`UPDATE assets SET status = 'ready' WHERE id = $1`, [assetId]);
@@ -73,17 +104,16 @@ async function buildVariant(
   client: PoolClient,
   assetId: number,
   siteId: number,
-  dir: string,
   purpose: "pc" | "sp",
   original: Buffer,
   hasAlpha: boolean
 ): Promise<ImageVariant> {
   const resized = sharp(original).rotate().resize({ width: TARGET_WIDTH[purpose], withoutEnlargement: true });
+  const objectDir = `${siteId}/${assetId}`;
 
   const webpBuffer = await resized.clone().webp({ quality: 80 }).toBuffer();
   const webpMeta = await sharp(webpBuffer).metadata();
-  const webpPath = `${purpose}.webp`;
-  await writeFile(path.join(dir, webpPath), webpBuffer);
+  const webpUrl = await uploadToStorage(`${objectDir}/${purpose}.webp`, webpBuffer, "image/webp");
 
   // Transparent originals fall back to PNG (flattening to JPEG would bake
   // in a solid background); opaque ones fall back to JPEG for the smaller
@@ -93,12 +123,11 @@ async function buildVariant(
     ? await resized.clone().png({ compressionLevel: 8 }).toBuffer()
     : await resized.clone().flatten({ background: "#ffffff" }).jpeg({ quality: 82 }).toBuffer();
   const fallbackExt = hasAlpha ? "png" : "jpg";
-  const fallbackPath = `${purpose}.${fallbackExt}`;
-  await writeFile(path.join(dir, fallbackPath), fallbackBuffer);
-
-  const urlBase = `/uploads/${siteId}/${assetId}`;
-  const webpUrl = `${urlBase}/${webpPath}`;
-  const fallbackUrl = `${urlBase}/${fallbackPath}`;
+  const fallbackUrl = await uploadToStorage(
+    `${objectDir}/${purpose}.${fallbackExt}`,
+    fallbackBuffer,
+    hasAlpha ? "image/png" : "image/jpeg"
+  );
 
   await client.query(
     `INSERT INTO asset_variants (asset_id, purpose, dpr, format, width, height, url, bytes)
