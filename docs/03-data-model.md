@@ -106,9 +106,9 @@ CREATE TABLE products (
 );
 ```
 
-初めて受信した商品コードは**受注API 同期バッチ**が `order_items` を書き込む際に
-自動で upsert される（CV タグ到達時点ではなく、**受注API との突合が完了した時点**で
-初めて商品が確定する点に注意。`sync_status` は 3 節参照）。
+初めて受信した商品コードは、**CV タグ到達時点で即座に** upsert される
+（サンクスページの `{商品毎出力}` ループタグが商品コード・数量・金額を直接送るため。
+`09-cart-integration.md` 3.2 節）。受注API を待つ必要はない。
 
 ### page_groups（ページの分類。imp / click の集計単位）
 
@@ -308,14 +308,14 @@ CREATE TABLE events (
   session_id     TEXT,
   trigger_type   TEXT,
   position       TEXT,
-  -- CV 用（受注APIによる補完が前提。09-cart-integration.md 3章参照）
+  -- CV 用（09-cart-integration.md 3章参照）
   order_id       TEXT,
-  order_type     TEXT CHECK (order_type IN ('first','recurring')),
-  revenue        NUMERIC(12,2),             -- 注文合計（明細内訳は order_items）
+  order_type     TEXT CHECK (order_type IN ('first','recurring','unknown')) DEFAULT 'unknown',  -- 受注APIから後日補完
+  revenue        NUMERIC(12,2),             -- サンクスページのタグから即時取得（明細内訳は order_items）
   attribution    TEXT CHECK (attribution IN ('none','click','view')),
   latency_sec    INT,                      -- 接触から CV までの秒数
-  sync_status    TEXT CHECK (sync_status IN ('pending','confirmed')) DEFAULT 'pending',
-  synced_at      TIMESTAMPTZ,              -- 受注APIとの突合が完了した時刻
+  order_type_status TEXT CHECK (order_type_status IN ('pending','confirmed')) DEFAULT 'pending',
+  order_type_synced_at TIMESTAMPTZ,        -- 受注APIとの突合が完了した時刻（初回/継続判定のみ）
   is_bot         BOOLEAN NOT NULL DEFAULT false,
   PRIMARY KEY (id, occurred_at)
 ) PARTITION BY RANGE (occurred_at);
@@ -324,40 +324,42 @@ CREATE UNIQUE INDEX ON events (event_id, occurred_at);
 CREATE UNIQUE INDEX events_cv_order ON events (site_id, order_id)
   WHERE event_type = 'cv' AND order_id IS NOT NULL;
 CREATE INDEX ON events (site_id, occurred_at DESC);
-CREATE INDEX events_cv_pending ON events (site_id, order_id) WHERE sync_status = 'pending';
+CREATE INDEX events_order_type_pending ON events (site_id, order_id) WHERE order_type_status = 'pending';
 ```
 
 - `event_id` で重複排除（ネットワーク再送・ページ再読込対策）
 - CV は部分ユニークインデックスで `site_id + order_id` の重複を**DB レベルで**排除
 - パーティションは月次。13 ヶ月経過したパーティションを `DROP` して保持期限を実装
-- cv イベントは**2 段階で確定**する: サンクスページのタグ到達時点で `sync_status='pending'`
-  として仮登録（`order_id` とタッチ情報のみ）→ 受注API 同期バッチが `order_type` / `revenue`
-  を補完して `sync_status='confirmed'` に更新する（`09-cart-integration.md` 3.2 節）
+- **CV イベントは受信時点でほぼ確定する**: サンクスページの `{商品毎出力}` ループタグが
+  `order_id` / `revenue` / 商品明細（→ `order_items`）を直接送るため、API の応答を待たない
+  （`09-cart-integration.md` 3.2 節）。唯一 `order_type`（初回/継続）だけは
+  差し込みタグに該当が無いため、受注API 同期バッチが後追いで補完する
+  （`order_type_status='pending'` → `'confirmed'`。3.4 節）
 
-### order_items（受注API から取得した注文明細）
+### order_items（サンクスページのループタグから取得した注文明細）
 
 商品別レポートの実体はこのテーブルです。`events` の `product_id` カラムは持ちません
 （1 注文が複数商品を含みうるため、1 対 1 のカラムでは表現できないことが
-受注API の `order_detail` 仕様（配列）から判明したためです）。
+`{商品毎出力}` ループタグの仕様から判明したためです）。
 
 ```sql
 CREATE TABLE order_items (
   id           BIGSERIAL PRIMARY KEY,
   site_id      BIGINT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
   order_id     TEXT NOT NULL,              -- events.order_id と対応
-  line_no      INT NOT NULL,               -- order_detail.product_no
+  line_no      INT NOT NULL,               -- CVイベント内の items 配列の並び順
   product_id   BIGINT NOT NULL REFERENCES products(id),
   product_code TEXT NOT NULL,              -- スナップショット（product_code 変更に強くする）
   quantity     INT NOT NULL,
-  revenue      NUMERIC(12,2) NOT NULL,     -- order_detail.product_total
-  is_subscription BOOLEAN NOT NULL DEFAULT false,  -- product_reg_flag = '定期'
+  revenue      NUMERIC(12,2) NOT NULL,     -- items[].revenueExTax
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (site_id, order_id, line_no)
 );
 CREATE INDEX ON order_items (site_id, product_id);
 ```
 
-- 受注API 同期バッチが `order_detail` を 1 行 1 レコードとして展開して書き込む
+- **CV イベント受信時に即座に**書き込まれる（`items` 配列をそのまま 1 行 1 レコードへ展開。
+  受注APIの同期を待たない。`09-cart-integration.md` 3.2〜3.3 節）
 - 商品別レポートの CV・売上は、`order_items` を `events`（`site_id + order_id` で結合）
   経由してキャンペーン・クリエイティブに紐づけて集計する（アトリビューションは
   注文単位で決まり、注文内の全商品に同じキャンペーンが帰属する）
@@ -400,10 +402,11 @@ CREATE TABLE stats_daily (
 1 行の中で `product_id <> 0` の行は `imps/clicks = 0`・`cv/revenue` のみが入り、
 `page_group_id <> 0` の行は `cv/revenue = 0`・`imps/clicks` のみが入ります。
 
-**`product_id` 行の作り方**: `order_items` を `events`（`site_id + order_id` で結合、
-`sync_status='confirmed'` の行のみ）と突き合わせ、`order_items.product_id` ごとに
-`revenue` を合計、`events.order_id` の distinct 数を `cv_click`/`cv_view` として集計する
-（キャンペーン・クリエイティブ・attribution は結合元の `events` 行から引き継ぐ）。
+**`product_id` 行の作り方**: `order_items` を `events`（`site_id + order_id` で結合）と
+突き合わせ、`order_items.product_id` ごとに `revenue` を合計、`events.order_id` の
+distinct 数を `cv_click`/`cv_view` として集計する（キャンペーン・クリエイティブ・
+attribution は結合元の `events` 行から引き継ぐ）。`order_type_status` の確定を待たずに
+集計できる（`order_type` は「初回のみ」フィルタ時にのみ参照する）。
 
 管理画面の集計軸は、このテーブルの GROUP BY だけで全て満たせる:
 
@@ -417,9 +420,11 @@ CREATE TABLE stats_daily (
 | キャンペーン別 | campaign_id |
 
 集計は日次 Cron で `events` / `order_items` から `INSERT ... ON CONFLICT DO UPDATE`。
-CV は受注API 同期の遅延を含めて最大 7 日遅れて確定するため、
-**毎回過去 8 日分を再集計**する（`sync_status='pending'` のまま 8 日を超えた
-CV は「注文突合失敗」として管理画面にアラート表示する）。
+CV・商品・売上はサンクスページのタグ到達時点でほぼ確定するが、
+`order_type`（初回/継続）だけは受注API 同期の遅延を含めて確定に時間差があるため、
+**毎回過去 8 日分を再集計**する（`order_type_status='pending'` のまま 8 日を超えた
+CV は「初回/継続 判定不能」として `order_type='unknown'` 扱いにし、
+「初回のみ」フィルタ時は除外せず注記付きで含める）。
 
 ## 5. 保持ポリシー
 

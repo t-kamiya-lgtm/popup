@@ -121,24 +121,32 @@ POST /e   Content-Type: application/json  (sendBeacon / keepalive fetch)
 }
 ```
 
-CV イベントのみ追加フィールド。**受注API 連携（`09-cart-integration.md` 3 章）を
-前提とし、クライアントから送るのは注文番号とタッチ情報のみ**にしています
-（商品コード・金額・初回/継続の判定は受注API 同期バッチが後追いで補完します）。
+CV イベントのみ追加フィールド。**サンクスページの `{商品毎出力}` ループタグ
+（`09-cart-integration.md` 3.2 節）を前提とし、商品コード・数量・金額は
+クライアントから即時送信します**。初回/継続の判定のみ、受注API 同期バッチが後追いで補完します。
 
 ```jsonc
 {
   "t": "cv",
-  "orderId": "EC-20260811-0001",      // order.ec_order_id と一致させる（唯一必須）
+  "orderId": "165",                    // {注文番号} タグの値
+  "customerId": "57",                  // {顧客ID} タグの値（任意）
+  "revenue": 2500,                     // {注文金額合計(税別)} タグの値
+  "tax": 160,
+  "items": [
+    { "code": "PK001", "qty": 2, "revenue": 2000 },
+    { "code": "PK002", "qty": 1, "revenue": 500 }
+  ],
   "touch": { "cid": 501, "crid": 9002, "type": "click", "ts": 1786490000000 }
 }
 ```
 
 - 応答は常に `204 No Content`（レスポンスボディ無しで最速）
 - サーバ側検証: `Origin` が `sites.allowed_hosts` に含まれるか、`touch.ts` が CV ウィンドウ内か
-- この時点では `events.sync_status = 'pending'`。受注API 同期バッチが
-  `order_type` / `revenue` / `order_items`（商品コード・数量）を補完し
-  `sync_status = 'confirmed'` にする（`03-data-model.md` 3 章）
-- `orderId` が空の場合は送信しない（重複排除キーが無い CV は受注APIと突合できない）
+- `items` は受信時点で即座に `order_items` へ展開し、`products` を自動 upsert する
+  （API の応答を待たない。`03-data-model.md` 参照）
+- `order_type`（初回/継続）だけは `order_type_status = 'pending'` で登録され、
+  受注API 同期バッチが `order.order_cnt` を確認して `'confirmed'` に更新する
+- `orderId` が空の場合は送信しない（重複排除キーが無い CV は計上しない）
 
 > `touch.tok`（HMAC 署名）は、カートが別ドメインの場合にのみ必要です。
 > プライムダイレクトは単一ドメイン構成のため、この節は付与しません（`09-cart-integration.md` 参照）。
@@ -174,12 +182,13 @@ Authorization: Bearer {siteApiKey}
 サンクスページに JS タグを設置できない顧客カート向けの経路として設計を保持します
 （プライムダイレクトでは 1.5 節の方式を使うため、これは未使用）。
 
-### 1.5 受注API 同期（内部バッチ・こちらがスマレジECを呼び出す）
+### 1.5 受注API 同期（内部バッチ・初回/継続判定のみに使用）
 
 1.4 節が「相手からこちらへ push してもらう」方式なのに対し、これは
 **こちらから相手の受注API を pull しにいく**方式です。プライムダイレクトが
-スマレジEC・受注API を提供しているため、こちらを主経路として採用しています
-（`09-cart-integration.md` 3〜4 章に詳細設計）。
+スマレジEC・受注API を提供しているため利用しますが、**商品コード・金額は
+サンクスページのタグから即時取得済み**のため、このバッチの役割は
+**`order_type`（初回/継続）の判定に限定**されます（`09-cart-integration.md` 3〜4 章）。
 
 ```
 [内部バッチ: サーバ側 Cron ジョブ]
@@ -187,22 +196,26 @@ GET/POST https://{カートのAPIドメイン}/api/v2/orders/search
 Authorization: Bearer {サイトごとに登録した access_token}
 
 body: {
-  "search_options": { "update_date_from": "{前回同期時刻}" },
+  "search_options": { "order_id_from": "{注文番号}", "order_id_to": "{注文番号}" },
   "response_options": { "response_type": "json" }
 }
 ```
 
 処理内容:
 
-1. `sites.orderApi`（`accessToken` / `baseUrl` / 前回同期時刻）を site ごとに読む
-2. `order.ec_order_id` を `events.order_id`（`sync_status='pending'`）と突合
-3. マッチした注文の `order_detail[]` を `order_items` へ展開して書き込む
-4. `order.order_cnt` から `order_type` を決定し、`events` を `sync_status='confirmed'` に更新
-5. 8 日以上 `pending` のまま残る CV は「注文突合失敗」として管理画面にアラート
+1. `sites.orderApi`（`accessToken` / `baseUrl`）を site ごとに読む
+2. `order_type_status='pending'` な `events`（cv）を数分おきにまとめて取得
+3. `{注文番号}` タグの値と一致する `order.order_id`（または `ec_order_id`。
+   `09-cart-integration.md` 3.5 節で確定）を受注API から検索
+4. `order.order_cnt` から `order_type` を決定し、`events` を `order_type_status='confirmed'` に更新
+5. 8 日以上 `pending` のまま残る CV は `order_type='unknown'` として扱う
+   （商品別・売上レポートには**既に計上済み**のため、この判定の遅延は
+   「初回のみ」フィルタの精度にのみ影響する）
 
 このエンドポイントは管理 API・計測 API のどちらとも異なり、**顧客のカート API を
 こちらが呼び出す内部ジョブ**である点に注意してください（顧客からのリクエストを
-受ける形ではありません）。
+受ける形ではありません）。このバッチが停止しても、**商品別レポート・売上・CV数は
+正常に動作し続けます**（影響は初回/継続の区別のみ）。
 
 ## 2. 管理 API（認証必須 / REST）
 
