@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: popup
+      POSTGRES_PASSWORD: popup
+      POSTGRES_DB: popup_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - popup_pgdata:/var/lib/postgresql/data
+
+volumes:
+  popup_pgdata:

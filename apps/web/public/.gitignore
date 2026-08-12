@@ -1,0 +1,5 @@
+# t.js and sdk.js are build output from packages/loader and packages/sdk,
+# copied here only for local `next dev`/`next start` convenience (production
+# serves them from a CDN — see docs/02-architecture.md). Don't commit them.
+t.js
+sdk.js

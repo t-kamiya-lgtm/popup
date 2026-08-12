@@ -3,6 +3,44 @@
 EC サイトに 1 タグ設置するだけで、離脱防止・クーポン・SNS 誘導などのポップアップバナーを
 配信・計測できる SaaS ツール。
 
+## Phase 1 実装状況
+
+初期スケルトンを実装済み。動作確認は Playwright で実ブラウザから
+タグ設置 → 配信設定取得 → dwell トリガー発火 → Shadow DOM 描画 → imp/click 計測 →
+DB 反映まで一通り確認済み（実装時に見つけたバグ 1 件を含め修正済み）。
+
+**実装済み:**
+- DB スキーマ（`db/migrations/`）: マスタ・イベント・RLS ポリシー一式。
+  RLS 未設定テーブルを検出する CI チェック（`db/check-rls.sql`）
+- `packages/shared`: URL マッチャ・ハッシュベースの均等配信ローテーション（22 テスト）
+- `packages/sdk`: 設定取得・ターゲティング・フリークエンシー制御・
+  トリガー（exit_back / dwell）・Shadow DOM 描画・計測送信・
+  CV アトリビューション（29 テスト、うち jsdom 上でのトリガー統合テストを含む）
+- `packages/loader`: 3KB のローダ（`t.js`）
+- `apps/web`: `GET /c/[siteId]`（配信設定 JSON）、`POST /e`（計測コレクタ）を実装。
+  テナント解決は `servicePool`（RLS バイパス）+ 明示的な `site.id` 絞り込みで実施
+
+**未実装（Phase 1 残り・Phase 2）:**
+- 管理画面（`docs/06-admin.md`）— キャンペーン CRUD、プレビュー、レポート UI
+- 画像自動最適化パイプライン（現状は creative の画像 URL が空プレースホルダー）
+- 受注API OAuth 連携（`docs/09-cart-integration.md` 3.5〜3.7）
+- 日次集計バッチ（`stats_daily`）、対照群（holdout）のレポート反映
+- マルチテナント認証（Auth.js 等）・管理 API
+
+### ローカルで動かす
+
+```bash
+pnpm install
+bash db/setup-local.sh                      # ロール・DB作成（初回のみ）
+DATABASE_URL=postgresql://popup:popup@localhost:5432/popup_dev node db/migrate.mjs
+DATABASE_URL=postgresql://popup_service:popup_service_dev@localhost:5432/popup_dev node db/seed.mjs
+pnpm build:client                            # t.js / sdk.js を apps/web/public/ へ
+pnpm --filter @popup/web dev                 # http://localhost:3000
+```
+
+`GET /c/SITE_PRIMEDIRECT.json` で配信設定、`POST /e` で計測を確認できます。
+テストは `pnpm -r test`、型チェックは `pnpm -r typecheck`。
+
 ## 前提（確定）
 
 | 項目 | 内容 |
