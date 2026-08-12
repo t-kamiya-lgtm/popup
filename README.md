@@ -26,10 +26,17 @@ DB 反映まで一通り確認済み（実装時に見つけたバグ 1 件を�
   共有し、`containerRelative` オプションでプレビュー枠内に描画（本番と
   同じレンダラなので描画のズレが起きない設計）。ログイン → 一覧 → 編集 →
   保存 → プレビュー描画までを実 Postgres + 実ブラウザ（Playwright）で確認済み
+- 画像アップロード・自動最適化（`docs/06-admin.md` 3、`apps/web/lib/assets.ts`）:
+  管理画面からアップロード → `sharp` で PC/SP 用にリサイズ（幅 380px / 320px）・
+  WebP 変換 + JPEG（透過画像は PNG）フォールバック生成 → `assets` /
+  `asset_variants` に登録 → `GET /c/[siteId]` の配信設定 JSON とプレビューが
+  同じ画像を参照。署名付きURL直接アップロード＋非同期ワーカーという本番構成
+  （`docs/06-admin.md` 3.1）の代わりに Phase 1 はリクエスト内で同期処理し
+  `apps/web/public/uploads/` に保存 — DB スキーマは同じなので、後で
+  オブジェクトストレージに差し替える際は `lib/assets.ts` だけ変更すればよい設計。
+  アップロード → 保存 → リロード後の永続化まで実ブラウザで確認済み
 
 **未実装（Phase 1 残り・Phase 2）:**
-- 画像自動最適化パイプライン（現状は creative の画像 URL が空プレースホルダーで、
-  管理画面プレビューも代替テキストのみ表示）
 - 実績レポート UI（imp/click/CV、ページ・商品別、クリエイティブ別）
 - 受注API OAuth 連携（`docs/09-cart-integration.md` 3.5〜3.7）
 - 日次集計バッチ（`stats_daily`）、対照群（holdout）のレポート反映

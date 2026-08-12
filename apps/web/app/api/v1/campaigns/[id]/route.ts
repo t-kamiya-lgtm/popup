@@ -17,6 +17,8 @@ interface CreativeInput {
   linkTarget: "_self" | "_blank";
   altText: string;
   weight: number;
+  assetPcId: number | null;
+  assetSpId: number | null;
 }
 
 interface CampaignPayload {
@@ -124,15 +126,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (cr.id && existingIds.has(cr.id)) {
         submittedIds.add(cr.id);
         await client.query(
-          `UPDATE creatives SET name=$2, status=$3, link_url=$4, link_target=$5, alt_text=$6, weight=$7
-           WHERE id = $1 AND campaign_id = $8`,
-          [cr.id, cr.name, cr.status, cr.linkUrl, cr.linkTarget, cr.altText, cr.weight, campaignId]
+          `UPDATE creatives SET name=$2, status=$3, link_url=$4, link_target=$5, alt_text=$6, weight=$7,
+             asset_pc_id=$8, asset_sp_id=$9
+           WHERE id = $1 AND campaign_id = $10`,
+          [cr.id, cr.name, cr.status, cr.linkUrl, cr.linkTarget, cr.altText, cr.weight, cr.assetPcId, cr.assetSpId, campaignId]
         );
       } else {
         await client.query(
-          `INSERT INTO creatives (campaign_id, name, status, link_url, link_target, alt_text, weight)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [campaignId, cr.name, cr.status, cr.linkUrl, cr.linkTarget, cr.altText, cr.weight]
+          `INSERT INTO creatives (campaign_id, name, status, link_url, link_target, alt_text, weight, asset_pc_id, asset_sp_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [campaignId, cr.name, cr.status, cr.linkUrl, cr.linkTarget, cr.altText, cr.weight, cr.assetPcId, cr.assetSpId]
         );
       }
     }

@@ -1,4 +1,6 @@
 import type { PoolClient } from "pg";
+import type { ImageVariant } from "@popup/shared";
+import { loadCreativeImages } from "./assets";
 
 export interface CampaignDetail {
   id: number;
@@ -28,6 +30,10 @@ export interface CampaignDetail {
     linkTarget: string;
     altText: string;
     weight: number;
+    assetPcId: number | null;
+    assetSpId: number | null;
+    imagePc: ImageVariant | null;
+    imageSp: ImageVariant | null;
   }[];
 }
 
@@ -47,8 +53,29 @@ export async function getCampaignDetail(client: PoolClient, campaignId: number):
     [campaignId]
   );
   const { rows: creativeRows } = await client.query(
-    `SELECT id, name, status, link_url, link_target, alt_text, weight FROM creatives WHERE campaign_id = $1 ORDER BY id`,
+    `SELECT id, name, status, link_url, link_target, alt_text, weight, asset_pc_id, asset_sp_id
+     FROM creatives WHERE campaign_id = $1 ORDER BY id`,
     [campaignId]
+  );
+  const creatives = await Promise.all(
+    creativeRows.map(async (cr) => {
+      const assetPcId = cr.asset_pc_id !== null ? Number(cr.asset_pc_id) : null;
+      const assetSpId = cr.asset_sp_id !== null ? Number(cr.asset_sp_id) : null;
+      const { pc, sp } = await loadCreativeImages(client, assetPcId, assetSpId);
+      return {
+        id: Number(cr.id),
+        name: cr.name,
+        status: cr.status,
+        linkUrl: cr.link_url,
+        linkTarget: cr.link_target,
+        altText: cr.alt_text,
+        weight: cr.weight,
+        assetPcId,
+        assetSpId,
+        imagePc: pc,
+        imageSp: sp,
+      };
+    })
   );
 
   return {
@@ -65,14 +92,6 @@ export async function getCampaignDetail(client: PoolClient, campaignId: number):
     overlay: c.overlay,
     closeButton: c.close_button,
     targets: targetRows.map((t) => ({ kind: t.kind, matchType: t.match_type, pattern: t.pattern })),
-    creatives: creativeRows.map((cr) => ({
-      id: Number(cr.id),
-      name: cr.name,
-      status: cr.status,
-      linkUrl: cr.link_url,
-      linkTarget: cr.link_target,
-      altText: cr.alt_text,
-      weight: cr.weight,
-    })),
+    creatives,
   };
 }

@@ -8,3 +8,7 @@ build/
 .env.local
 .DS_Store
 coverage/
+
+# Phase 1 local-disk asset storage (lib/assets.ts) — a real object store
+# (S3 etc.) replaces this in production; see docs/06-admin.md 3.1.
+apps/web/public/uploads/

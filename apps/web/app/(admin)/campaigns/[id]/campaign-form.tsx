@@ -5,6 +5,11 @@ import { useMemo, useState } from "react";
 import type { CampaignDetail } from "@/lib/campaigns";
 import { PreviewPanel } from "./preview-panel";
 
+interface UploadResponse {
+  assetId: number;
+  images: { pc: CreativeConfig["images"]["pc"]; sp: CreativeConfig["images"]["sp"] };
+}
+
 const POSITION_PC_OPTIONS: { value: PositionPc; label: string }[] = [
   { value: "bottom_right", label: "右下" },
   { value: "bottom_center", label: "下部中央" },
@@ -40,6 +45,33 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  async function handleImageUpload(i: number, file: File) {
+    setUploadingIndex(i);
+    setUploadError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/v1/assets", { method: "POST", body: form });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setUploadError(body.error ?? "アップロードに失敗しました");
+        return;
+      }
+      const { assetId, images } = body as UploadResponse;
+      updateCreative(i, {
+        assetPcId: assetId,
+        assetSpId: assetId,
+        imagePc: images.pc,
+        imageSp: images.sp,
+      });
+    } finally {
+      setUploadingIndex(null);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -89,11 +121,11 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
       linkTarget: c.linkTarget as "_self" | "_blank",
       alt: c.altText,
       images: {
-        // No asset pipeline yet (docs/08-roadmap.md gap) — same empty
-        // fallback the live config JSON serves, so the preview shows
-        // exactly what production currently shows: alt text, no image.
-        pc: { w: 380, h: 300, fallback: "" },
-        sp: { w: 320, h: 400, fallback: "" },
+        // Falls back to the same empty placeholder the live config JSON
+        // serves for a creative with no uploaded image yet, so the
+        // preview shows exactly what production would show: alt text only.
+        pc: c.imagePc ?? { w: 380, h: 300, fallback: "" },
+        sp: c.imageSp ?? { w: 320, h: 400, fallback: "" },
       },
     };
   }, [creatives, previewIndex]);
@@ -316,15 +348,51 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
                 value={c.altText}
                 onChange={(e) => updateCreative(i, { altText: e.target.value })}
                 placeholder="代替テキスト"
-                style={{ ...inputStyle, width: "100%" }}
+                style={{ ...inputStyle, width: "100%", marginBottom: 8 }}
               />
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {c.imagePc && (
+                  <img
+                    src={c.imagePc.fallback}
+                    alt=""
+                    style={{ width: 64, height: 64, objectFit: "contain", border: "1px solid #eee", borderRadius: 4 }}
+                  />
+                )}
+                <label style={{ fontSize: 13 }}>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    style={{ display: "block" }}
+                    disabled={uploadingIndex === i}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleImageUpload(i, file);
+                      e.target.value = "";
+                    }}
+                  />
+                  {uploadingIndex === i && <span>アップロード中...</span>}
+                </label>
+              </div>
             </div>
           ))}
+          {uploadError && <p style={{ color: "crimson", fontSize: 13 }}>{uploadError}</p>}
           <button
             onClick={() =>
               setCreatives([
                 ...creatives,
-                { id: 0, name: "新規クリエイティブ", status: "active", linkUrl: "", linkTarget: "_blank", altText: "", weight: 1 },
+                {
+                  id: 0,
+                  name: "新規クリエイティブ",
+                  status: "active",
+                  linkUrl: "",
+                  linkTarget: "_blank",
+                  altText: "",
+                  weight: 1,
+                  assetPcId: null,
+                  assetSpId: null,
+                  imagePc: null,
+                  imageSp: null,
+                },
               ])
             }
           >
@@ -335,7 +403,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
             {creatives.filter((c) => c.status === "active").length > 0
               ? (100 / creatives.filter((c) => c.status === "active").length).toFixed(1)
               : 0}
-            %）。画像アップロードは未実装のため、プレビューは代替テキストのみ表示されます。
+            %）。画像は自動でPC/SP用にリサイズ・WebP変換されます（推奨: 横760px以上）。
           </p>
         </Section>
 

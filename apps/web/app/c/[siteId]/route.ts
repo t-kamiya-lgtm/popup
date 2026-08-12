@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { CampaignConfig, CreativeConfig, PageGroupConfig, SiteConfig } from "@popup/shared";
+import type { CampaignConfig, CreativeConfig, ImageVariant, PageGroupConfig, SiteConfig } from "@popup/shared";
 import { servicePool } from "@/lib/db";
+import { loadCreativeImages } from "@/lib/assets";
+
+const EMPTY_IMAGE: ImageVariant = { w: 380, h: 300, fallback: "" };
+const EMPTY_IMAGE_SP: ImageVariant = { w: 320, h: 400, fallback: "" };
 
 export const dynamic = "force-dynamic"; // computed per-request; CDN caches via headers below
 
@@ -66,24 +70,33 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ sit
     const exclude = targetRows.filter((t) => t.kind === "exclude").map((t) => ({ match: t.match_type, pattern: t.pattern }));
 
     const { rows: creativeRows } = await servicePool().query(
-      `SELECT id, weight, link_url, link_target, alt_text FROM creatives
+      `SELECT id, weight, link_url, link_target, alt_text, asset_pc_id, asset_sp_id FROM creatives
        WHERE campaign_id = $1 AND status = 'active'`,
       [c.id]
     );
-    // Image variants come from the asset-optimization pipeline
-    // (docs/06-admin.md 3), which isn't built yet — placeholder fallback
-    // keeps the config JSON shape stable for the SDK to develop against.
-    const creatives: CreativeConfig[] = creativeRows.map((cr) => ({
-      id: Number(cr.id),
-      weight: cr.weight,
-      linkUrl: cr.link_url,
-      linkTarget: cr.link_target,
-      alt: cr.alt_text,
-      images: {
-        pc: { w: 380, h: 300, fallback: "" },
-        sp: { w: 320, h: 400, fallback: "" },
-      },
-    }));
+    // SP falls back to the PC asset (docs/06-admin.md 2 — "SP: 未設定なら
+    // PC 画像を自動最適化して流用"; both purposes are generated from the
+    // same upload, so asset_sp_id is null only when a creative predates
+    // the upload feature). A creative without any asset yet still needs a
+    // config-shaped placeholder so the SDK has something to render.
+    const creatives: CreativeConfig[] = await Promise.all(
+      creativeRows.map(async (cr) => {
+        const assetPcId = cr.asset_pc_id !== null ? Number(cr.asset_pc_id) : null;
+        const assetSpId = cr.asset_sp_id !== null ? Number(cr.asset_sp_id) : assetPcId;
+        const { pc, sp } = await loadCreativeImages(servicePool(), assetPcId, assetSpId);
+        return {
+          id: Number(cr.id),
+          weight: cr.weight,
+          linkUrl: cr.link_url,
+          linkTarget: cr.link_target,
+          alt: cr.alt_text,
+          images: {
+            pc: pc ?? EMPTY_IMAGE,
+            sp: sp ?? EMPTY_IMAGE_SP,
+          },
+        };
+      })
+    );
     if (creatives.length === 0) continue; // nothing to show; skip the campaign entirely
 
     campaigns.push({
