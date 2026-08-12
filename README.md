@@ -19,13 +19,21 @@ DB 反映まで一通り確認済み（実装時に見つけたバグ 1 件を�
 - `packages/loader`: 3KB のローダ（`t.js`）
 - `apps/web`: `GET /c/[siteId]`（配信設定 JSON）、`POST /e`（計測コレクタ）を実装。
   テナント解決は `servicePool`（RLS バイパス）+ 明示的な `site.id` 絞り込みで実施
+- 管理画面（`docs/06-admin.md`）: ログイン（iron-session の httpOnly Cookie、
+  bcrypt でパスワード照合）、キャンペーン一覧・編集（対象ページ URL ルール／
+  表示条件／表示位置／クリエイティブの CRUD）、PC・SP 切り替え可能なライブ
+  プレビュー。プレビューは `@popup/sdk/render` の `renderPopup` を SDK と
+  共有し、`containerRelative` オプションでプレビュー枠内に描画（本番と
+  同じレンダラなので描画のズレが起きない設計）。ログイン → 一覧 → 編集 →
+  保存 → プレビュー描画までを実 Postgres + 実ブラウザ（Playwright）で確認済み
 
 **未実装（Phase 1 残り・Phase 2）:**
-- 管理画面（`docs/06-admin.md`）— キャンペーン CRUD、プレビュー、レポート UI
-- 画像自動最適化パイプライン（現状は creative の画像 URL が空プレースホルダー）
+- 画像自動最適化パイプライン（現状は creative の画像 URL が空プレースホルダーで、
+  管理画面プレビューも代替テキストのみ表示）
+- 実績レポート UI（imp/click/CV、ページ・商品別、クリエイティブ別）
 - 受注API OAuth 連携（`docs/09-cart-integration.md` 3.5〜3.7）
 - 日次集計バッチ（`stats_daily`）、対照群（holdout）のレポート反映
-- マルチテナント認証（Auth.js 等）・管理 API
+- サイト切り替え（複数サイト運用時の管理画面 UI。現状は最初の1件のみ表示）
 
 ### ローカルで動かす
 
@@ -39,6 +47,8 @@ pnpm --filter @popup/web dev                 # http://localhost:3000
 ```
 
 `GET /c/SITE_PRIMEDIRECT.json` で配信設定、`POST /e` で計測を確認できます。
+管理画面は `http://localhost:3000/login`（`db/seed.mjs` が作成する
+`owner@example.com` / `password123` でログイン）。
 テストは `pnpm -r test`、型チェックは `pnpm -r typecheck`。
 
 ## 前提（確定）

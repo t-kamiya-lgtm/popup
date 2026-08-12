@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Local dev seed: one account + the primedirect.jp site + a sample campaign.
-// Must run as a role that bypasses RLS (superuser), since seeding creates
-// rows across tenants before any app.account_id context exists.
+// Local dev seed: one account + the primedirect.jp site + a sample campaign
+// + a dev user who can log into the admin UI. Must run as a role that
+// bypasses RLS (superuser), since seeding creates rows across tenants
+// before any app.account_id context exists.
+import bcrypt from "bcryptjs";
 import pg from "pg";
 
 const connectionString = process.env.DATABASE_URL;
@@ -9,6 +11,9 @@ if (!connectionString) {
   console.error("DATABASE_URL is not set");
   process.exit(1);
 }
+
+const DEV_EMAIL = "owner@example.com";
+const DEV_PASSWORD = "password123"; // local dev only — never used in prod seeding
 
 const client = new pg.Client({ connectionString });
 
@@ -82,8 +87,19 @@ async function main() {
     [campaign.id]
   );
 
+  const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
+  const { rows: [user] } = await client.query(
+    `INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id`,
+    [DEV_EMAIL, passwordHash]
+  );
+  await client.query(
+    `INSERT INTO memberships (account_id, user_id, role, accepted_at) VALUES ($1, $2, 'owner', now())`,
+    [account.id, user.id]
+  );
+
   await client.query("COMMIT");
   console.log(`Seeded account ${account.id}, site ${site.id} (SITE_PRIMEDIRECT), campaign ${campaign.id}`);
+  console.log(`Dev login: ${DEV_EMAIL} / ${DEV_PASSWORD}`);
   await client.end();
 }
 

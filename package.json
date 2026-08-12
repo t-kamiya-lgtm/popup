@@ -15,6 +15,7 @@
     "build:client": "pnpm --filter @popup/loader build && pnpm --filter @popup/sdk build && node scripts/copy-client-dist.mjs"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "pg": "^8.23.0"
   },
   "devDependencies": {

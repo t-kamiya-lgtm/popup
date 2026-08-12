@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./render": "./src/render.ts"
+  },
   "scripts": {
     "build": "node build.mjs",
     "test": "vitest run",

@@ -10,6 +10,26 @@ export interface RenderOptions {
   onVisible: () => void;
   onClick: () => void;
   onClose: () => void;
+  /**
+   * Skips the actual navigation on click, while still invoking onClick.
+   * Used only by the admin preview (docs/06-admin.md 4) — real delivery
+   * always navigates. Keeping this as an option on the *same* render
+   * function, rather than a separate preview-only renderer, is the whole
+   * point: the admin preview and the live SDK render through identical
+   * code, so a preview that "looks right" can't diverge from production.
+   */
+  disableNavigation?: boolean;
+  /**
+   * Also preview-only. Production always uses `position: fixed` (relative
+   * to the visitor's actual viewport — see docs/05-tag-sdk.md 5.2). An
+   * *embedded* preview panel needs the popup positioned within its own
+   * device-frame box instead, so this swaps `fixed`→`absolute` (the frame
+   * must be `position: relative; container-type: inline-size`) and swaps
+   * the `vw`-based width cap to the equivalent container-query unit. Every
+   * other rule — structure, classes, offsets, the position lookup table
+   * itself — stays byte-for-byte the same as delivery.
+   */
+  containerRelative?: boolean;
 }
 
 export interface RenderedPopup {
@@ -37,17 +57,21 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
   const showOverlay = opts.overlay && isCentered;
   const image = opts.device === "pc" ? opts.creative.images.pc : opts.creative.images.sp;
 
+  const positionKeyword = opts.containerRelative ? "absolute" : "fixed";
+  const widthUnit = opts.containerRelative ? "cqw" : "vw";
+  const maxWidth = isCentered ? "560px" : "380px";
+
   const style = document.createElement("style");
   style.textContent = `
     :host { all: initial; }
     .pz-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      position: ${positionKeyword}; inset: 0; background: rgba(0,0,0,0.5);
       z-index: 2147483000;
     }
     .pz-banner {
-      position: fixed; z-index: 2147483001;
-      max-width: ${isCentered ? "560px" : "380px"};
-      width: min(86vw, ${isCentered ? "560px" : "380px"});
+      position: ${positionKeyword}; z-index: 2147483001;
+      max-width: ${maxWidth};
+      width: min(86${widthUnit}, ${maxWidth});
       box-shadow: 0 4px 24px rgba(0,0,0,0.2);
       border-radius: 8px; overflow: hidden; background: #fff;
       ${POSITION_STYLES[position]}
@@ -106,6 +130,7 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
   function handleClick(e: MouseEvent) {
     e.preventDefault();
     opts.onClick();
+    if (opts.disableNavigation) return;
     // sendBeacon (used by onClick's collector call) doesn't block
     // navigation, so it's safe to navigate on the same tick.
     if (opts.creative.linkTarget === "_blank") {
