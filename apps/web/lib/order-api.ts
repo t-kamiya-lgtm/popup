@@ -18,7 +18,12 @@ export interface OrderApiConnection {
   lastError: string | null;
 }
 
-const SCOPE = "read_sales"; // docs/09-cart-integration.md 3.5 — 受注データ参照のみ要求
+// docs/09-cart-integration.md 3.5 assumed a `scope=read_sales` param would
+// be needed, following generic OAuth2 convention — verified against the
+// live API (2026-08-12) and it rejects that value with
+// `invalid_scope: An unsupported scope was requested`. スマレジEC・リピート
+// apparently fixes the granted scope at app-registration time instead (via
+// 外部アプリ連携 in their own admin screen), so no `scope` param is sent here.
 
 export async function getConnection(client: Queryable, siteId: number): Promise<OrderApiConnection | null> {
   const { rows } = await client.query(
@@ -96,7 +101,6 @@ export async function buildAuthorizeUrl(client: Queryable, siteId: number, redir
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("state", state);
-  url.searchParams.set("scope", SCOPE);
   return url.toString();
 }
 
