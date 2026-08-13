@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ReportData } from "@/lib/reports";
+import type { FilterOptions, ReportData } from "@/lib/reports";
 
 type Preset = "today" | "yesterday" | "7d" | "30d" | "thisMonth" | "lastMonth" | "custom";
 
@@ -57,6 +57,17 @@ export function ReportsPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
+  const [productCode, setProductCode] = useState("");
+  const [pageGroupId, setPageGroupId] = useState("");
+  const [creativeId, setCreativeId] = useState("");
+
+  useEffect(() => {
+    fetch("/api/v1/reports/filters")
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setFilterOptions);
+  }, []);
+
   const range = useMemo(() => {
     if (preset !== "custom") return rangeForPreset(preset);
     return { from: new Date(customFrom), to: new Date(customTo) };
@@ -66,6 +77,9 @@ export function ReportsPanel() {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ from: range.from.toISOString(), to: range.to.toISOString() });
+    if (productCode) params.set("productCode", productCode);
+    if (pageGroupId) params.set("pageGroupId", pageGroupId);
+    if (creativeId) params.set("creativeId", creativeId);
     fetch(`/api/v1/reports?${params}`)
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? "取得に失敗しました");
@@ -74,7 +88,7 @@ export function ReportsPanel() {
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [range]);
+  }, [range, productCode, pageGroupId, creativeId]);
 
   function handlePresetChange(p: Preset) {
     setPreset(p);
@@ -108,6 +122,14 @@ export function ReportsPanel() {
     lines.push("クリエイティブ,imp,click,CTR,CV,CVR,売上");
     for (const c of data.creatives) {
       lines.push([`"${c.name}"`, c.imps, c.clicks, pct(c.ctr), c.cvs, pct(c.cvr), c.revenue].join(","));
+    }
+    lines.push("");
+    lines.push("詳細データ（アイテム×ページ×クリエイティブ）");
+    lines.push("商品コード,商品名,ページグループ,クリエイティブ,CV(クリックスルー),CV(ビュースルー),売上");
+    for (const d of data.details) {
+      lines.push(
+        [d.productCode ?? "", `"${d.productName}"`, `"${d.pageGroupName}"`, `"${d.creativeName}"`, d.cvClick, d.cvView, d.revenue].join(",")
+      );
     }
 
     const blob = new Blob([`﻿${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
@@ -150,6 +172,50 @@ export function ReportsPanel() {
           CSV出力
         </button>
       </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 24 }}>
+        <select value={productCode} onChange={(e) => setProductCode(e.target.value)}>
+          <option value="">商品: すべて</option>
+          {filterOptions?.products.map((p) => (
+            <option key={p.code} value={p.code}>
+              {p.name ? `${p.code}（${p.name}）` : p.code}
+            </option>
+          ))}
+        </select>
+        <select value={pageGroupId} onChange={(e) => setPageGroupId(e.target.value)}>
+          <option value="">ページ: すべて</option>
+          {filterOptions?.pageGroups.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <select value={creativeId} onChange={(e) => setCreativeId(e.target.value)}>
+          <option value="">クリエイティブ: すべて</option>
+          {filterOptions?.creatives.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        {(productCode || pageGroupId || creativeId) && (
+          <button
+            onClick={() => {
+              setProductCode("");
+              setPageGroupId("");
+              setCreativeId("");
+            }}
+          >
+            絞り込みをクリア
+          </button>
+        )}
+      </div>
+      {productCode && (
+        <p style={{ color: "#666", fontSize: 13, marginTop: -16, marginBottom: 16 }}>
+          商品で絞り込み中のため、表示回数・クリック数・ページ別・クリエイティブ別は表示されません
+          （imp/click は商品と紐付いていないため）。
+        </p>
+      )}
 
       {loading && <p>読み込み中...</p>}
       {error && <p style={{ color: "crimson" }}>{error}</p>}
@@ -208,6 +274,26 @@ export function ReportsPanel() {
                 yen(c.revenue),
               ])}
               empty="クリエイティブがありません"
+            />
+          </Section>
+
+          <Section title="詳細データ（アイテム × ページ × クリエイティブ）">
+            <p style={{ color: "#666", fontSize: 13 }}>
+              CVごとに、購入商品・接触した表示位置（ページグループ）・クリエイティブの組み合わせで集計します。
+              ページグループは接触時点のもののみ記録されるため、この機能の追加前に発生したCVは「（ページ不明）」に入ります。
+            </p>
+            <Table
+              head={["商品コード", "商品名", "ページグループ", "クリエイティブ", "CV（クリックスルー）", "CV（ビュースルー）", "売上"]}
+              rows={data.details.map((d) => [
+                d.productCode ?? "—",
+                d.productName,
+                d.pageGroupName,
+                d.creativeName,
+                d.cvClick.toLocaleString("ja-JP"),
+                d.cvView.toLocaleString("ja-JP"),
+                yen(d.revenue),
+              ])}
+              empty="データがありません"
             />
           </Section>
         </>

@@ -102,6 +102,8 @@ export interface TouchEntry {
   crid: number;
   type: "click" | "view";
   ts: number;
+  /** page_group id the touch happened on, if the page matched one — carried through to the eventual CV's attribution (apps/web/app/e/route.ts). */
+  pg?: number;
 }
 
 const TOUCH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // matches the 7-day CV click window default

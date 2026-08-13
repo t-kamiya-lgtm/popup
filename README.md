@@ -74,6 +74,25 @@ DB 反映まで一通り確認済み（実装時に見つけたバグ 1 件を�
   1万PV想定）なら都度集計で十分速いための Phase 1 判断。比較（前期間比）・行クリックでの
   ドリルダウンは未実装。実データを投入したうえで imp/click/CTR/CV/CVR/売上の
   集計結果が一致することを確認済み
+- レポートの絞り込み（商品・ページ・クリエイティブ）と、詳細データ
+  （アイテム×ページ×クリエイティブの組み合わせごとの集計）。この組み合わせを取るには
+  CV イベントが「どのページで接触されたか」を知る必要があるが、従来はCVイベントに
+  `page_group_id` が記録されていなかった（サンクスページの `event_type='cv'` 行には
+  campaign_id/creative_id のみで、page_group_id はカラムはあるのに未設定だった）ため、
+  `packages/sdk`（タッチ情報に `pg` を追加）と `apps/web/app/e/route.ts`
+  （CVの INSERT に `page_group_id` を追加）を修正し、以降発生するCVから記録されるように
+  した。この変更前のCVは「（ページ不明）」として表示される。商品で絞り込むと
+  imp/click/ページ別/クリエイティブ別は「該当なし」になる旨を画面上に明記
+  （imp/click は商品と結び付いていないため）
+
+**実装中に見つけた別件の本番バグ（今回まとめて修正）:**
+- `apps/web/public/sdk.js`/`t.js`（顧客サイトに設置される実タグ本体）はビルド生成物として
+  `.gitignore` されており、`apps/web` の `build` スクリプトも元は `next build` のみ
+  だったため、**Vercel上の本番デプロイでは一度も生成されず配信タグが 404 していた**
+  （ローカルでは `pnpm run build:client` を手動実行していたため気づかず動いて見えていた）。
+  `apps/web/package.json` の `build` スクリプトを `packages/loader`/`packages/sdk` の
+  ビルド→コピー→`next build` の順に実行するよう修正し、ローカルで
+  `cd apps/web && pnpm run build` を実行して `public/sdk.js`/`t.js` が生成されることを確認済み
 
 **未実装（Phase 1 残り・Phase 2）:**
 - 日次集計バッチ（`stats_daily`）— 実績レポート自体は動作済みだが、都度集計の代わりに

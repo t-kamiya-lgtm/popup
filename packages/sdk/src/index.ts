@@ -101,7 +101,7 @@ function showPopup(
     closeButton: campaign.render.closeButton,
     onVisible: () => {
       const now = Date.now();
-      addTouch({ cid: campaign.id, crid: creative.id, type: "view", ts: now });
+      addTouch({ cid: campaign.id, crid: creative.id, type: "view", ts: now, pg: pageGroupId });
       persistFrequency(campaign.id, (state) => recordShow(state, now, sessionId, localDayKey(new Date(now))));
       sendEvents(config.endpoints.collect, config.site.id, config.v, [
         {
@@ -122,7 +122,7 @@ function showPopup(
     },
     onClick: () => {
       const now = Date.now();
-      addTouch({ cid: campaign.id, crid: creative.id, type: "click", ts: now });
+      addTouch({ cid: campaign.id, crid: creative.id, type: "click", ts: now, pg: pageGroupId });
       persistFrequency(campaign.id, (state) => recordClick(state, now));
       sendEvents(config.endpoints.collect, config.site.id, config.v, [
         {
@@ -197,7 +197,7 @@ function installConversionQueue(config: SiteConfig, visitorId: string) {
         customerId: payload.customerId,
         revenueExTax: payload.revenueExTax,
         items: payload.items ?? [],
-        touch: touch ? { cid: touch.cid, crid: touch.crid, type: touch.type, ts: touch.ts } : undefined,
+        touch: touch ? { cid: touch.cid, crid: touch.crid, type: touch.type, ts: touch.ts, pg: touch.pg } : undefined,
       },
     ]);
   }
