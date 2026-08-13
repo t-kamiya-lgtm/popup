@@ -3,6 +3,7 @@
 import type { CreativeConfig, Device, PositionPc } from "@popup/shared";
 import { useMemo, useState } from "react";
 import type { CampaignDetail } from "@/lib/campaigns";
+import { normalizeUrlPattern } from "@/lib/url-pattern";
 import { ENLARGED_SCALE, PreviewPanel } from "./preview-panel";
 
 interface UploadResponse {
@@ -82,6 +83,11 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
       if (exitBack) rules.push({ type: "exit_back" });
       if (dwell) rules.push({ type: "dwell", seconds: dwellSeconds });
 
+      const normalizedTargets = targets
+        .filter((t) => t.pattern.trim() !== "")
+        .map((t) => ({ ...t, pattern: normalizeUrlPattern(t.pattern, t.matchType) }));
+      setTargets(normalizedTargets);
+
       const res = await fetch(`/api/v1/campaigns/${initial.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -97,7 +103,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
           positionSp: "center",
           overlay,
           closeButton,
-          targets: targets.filter((t) => t.pattern.trim() !== ""),
+          targets: normalizedTargets,
           creatives: creatives.filter((c) => c.linkUrl.trim() !== ""),
         }),
       });

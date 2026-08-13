@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCampaignDetail } from "@/lib/campaigns";
 import { withAccount } from "@/lib/db";
 import { requireAccountId } from "@/lib/require-account";
+import { normalizeUrlPattern } from "@/lib/url-pattern";
 
 interface TargetInput {
   kind: "include" | "exclude";
@@ -110,7 +111,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       await client.query(
         `INSERT INTO campaign_targets (campaign_id, kind, target_type, match_type, pattern)
          VALUES ($1, $2, 'url', $3, $4)`,
-        [campaignId, t.kind, t.matchType, t.pattern]
+        [campaignId, t.kind, t.matchType, normalizeUrlPattern(t.pattern, t.matchType)]
       );
     }
 
