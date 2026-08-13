@@ -131,12 +131,13 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
     e.preventDefault();
     opts.onClick();
     if (opts.disableNavigation) return;
+    const destination = forwardQueryParams(opts.creative.linkUrl, location.href);
     // sendBeacon (used by onClick's collector call) doesn't block
     // navigation, so it's safe to navigate on the same tick.
     if (opts.creative.linkTarget === "_blank") {
-      window.open(opts.creative.linkUrl, "_blank", "noopener");
+      window.open(destination, "_blank", "noopener");
     } else {
-      location.href = opts.creative.linkUrl;
+      location.href = destination;
     }
   }
   link.addEventListener("click", handleClick);
@@ -192,4 +193,29 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
   }
 
   return { destroy };
+}
+
+/**
+ * Carries ad-attribution query params (gclid, srsltid, utm_*, and whatever
+ * new ones ad platforms invent next) from the page the visitor is on
+ * through to the creative's link, so a click on the popup doesn't break the
+ * attribution chain. Whole query string, not a fixed allowlist — the set of
+ * click-id param names in the wild keeps growing, and an allowlist would
+ * silently miss new ones. Params already present on the destination URL win
+ * (the creative's own link is authoritative for anything it explicitly
+ * sets); everything else from the current page is added.
+ */
+export function forwardQueryParams(linkUrl: string, currentPageUrl: string): string {
+  try {
+    const destination = new URL(linkUrl, currentPageUrl);
+    const current = new URL(currentPageUrl).searchParams;
+    for (const [key, value] of current) {
+      if (!destination.searchParams.has(key)) {
+        destination.searchParams.set(key, value);
+      }
+    }
+    return destination.toString();
+  } catch {
+    return linkUrl;
+  }
 }
