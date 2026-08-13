@@ -4,6 +4,21 @@ import { servicePool } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
+// The `sendBeacon` path (see packages/sdk/collector.ts) needs no CORS
+// headers — it's a no-cors request whose response is never read. But its
+// `fetch keepalive` fallback sends `Content-Type: application/json`, which
+// isn't a "simple" request and triggers a preflight OPTIONS the browser
+// will only honor with these headers present.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 type EventType = "imp" | "click" | "cv" | "close" | "holdout";
 
 interface TouchInfo {
@@ -61,11 +76,11 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return new NextResponse(null, { status: 204 });
+    return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
   }
 
   if (!body?.sid || !Array.isArray(body.events) || body.events.length === 0) {
-    return new NextResponse(null, { status: 204 });
+    return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
   }
 
   const { rows: siteRows } = await servicePool().query(
@@ -74,13 +89,13 @@ export async function POST(req: NextRequest) {
   );
   const site = siteRows[0];
   if (!site) {
-    return NextResponse.json({ error: "site not found" }, { status: 404 });
+    return NextResponse.json({ error: "site not found" }, { status: 404, headers: CORS_HEADERS });
   }
 
   if (!isAllowedOrigin(req.headers.get("origin"), site.allowed_hosts)) {
     // Silently drop rather than error — see file header. A spoofed Origin
     // just means these events never get inserted.
-    return new NextResponse(null, { status: 204 });
+    return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
   }
 
   const client = await servicePool().connect();
@@ -95,7 +110,7 @@ export async function POST(req: NextRequest) {
     client.release();
   }
 
-  return new NextResponse(null, { status: 204 });
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
 async function processEvent(

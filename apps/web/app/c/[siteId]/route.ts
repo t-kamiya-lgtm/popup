@@ -8,6 +8,17 @@ const EMPTY_IMAGE_SP: ImageVariant = { w: 320, h: 400, fallback: "" };
 
 export const dynamic = "force-dynamic"; // computed per-request; CDN caches via headers below
 
+// This config is fetched via `fetch()` (not a <script> tag) by sdk.js running
+// on whatever third-party page the tag is installed on, so the browser
+// enforces CORS on the response. It's deliberately un-authenticated (see the
+// GET handler doc comment) and keyed only by the public sitePublicId in the
+// path, so allowing any origin doesn't widen what a caller can get at.
+const CORS_HEADERS = { "Access-Control-Allow-Origin": "*" };
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 /**
  * GET /c/{sitePublicId}.json — the config JSON described in docs/04-api.md
  * 1.1. Deliberately un-authenticated and served with an `s-maxage` so a CDN
@@ -31,7 +42,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ sit
   );
   const site = siteRows[0];
   if (!site) {
-    return NextResponse.json({ error: "site not found" }, { status: 404 });
+    return NextResponse.json({ error: "site not found" }, { status: 404, headers: CORS_HEADERS });
   }
 
   const { rows: pageGroupRows } = await servicePool().query(
@@ -139,6 +150,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ sit
   return NextResponse.json(config, {
     headers: {
       "Cache-Control": "public, s-maxage=60, stale-while-revalidate=600",
+      ...CORS_HEADERS,
     },
   });
 }
