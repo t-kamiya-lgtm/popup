@@ -191,7 +191,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
               >
                 <option value="exact">完全一致</option>
                 <option value="prefix">前方一致</option>
-                <option value="contains">含む</option>
+                <option value="contains">部分一致</option>
                 <option value="regex">正規表現</option>
               </select>
               <input
