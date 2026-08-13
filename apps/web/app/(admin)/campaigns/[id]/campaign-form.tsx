@@ -3,7 +3,7 @@
 import type { CreativeConfig, Device, PositionPc } from "@popup/shared";
 import { useMemo, useState } from "react";
 import type { CampaignDetail } from "@/lib/campaigns";
-import { PreviewPanel } from "./preview-panel";
+import { ENLARGED_SCALE, PreviewPanel } from "./preview-panel";
 
 interface UploadResponse {
   assetId: number;
@@ -41,6 +41,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
 
   const [previewDevice, setPreviewDevice] = useState<Device>("pc");
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [enlarged, setEnlarged] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -131,10 +132,9 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
   }, [creatives, previewIndex]);
 
   return (
-    <div style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>
-      <div style={{ flex: "1 1 600px", maxWidth: 640 }}>
-        <a href="/campaigns">← キャンペーン一覧</a>
-        <h1 style={{ fontSize: 20 }}>キャンペーン編集</h1>
+    <div style={{ maxWidth: 640 }}>
+      <a href="/campaigns">← キャンペーン一覧</a>
+      <h1 style={{ fontSize: 20 }}>キャンペーン編集</h1>
 
         <Section title="① 基本">
           <Field label="キャンペーン名">
@@ -405,19 +405,9 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
               : 0}
             %）。画像は自動でPC/SP用にリサイズ・WebP変換されます（推奨: 横760px以上）。
           </p>
-        </Section>
+      </Section>
 
-        <div style={{ marginTop: 16 }}>
-          <button onClick={handleSave} disabled={saving} style={{ padding: "10px 24px" }}>
-            {saving ? "保存中..." : "保存"}
-          </button>
-          {savedAt && <span style={{ marginLeft: 12, color: "green" }}>保存しました</span>}
-          {error && <span style={{ marginLeft: 12, color: "crimson" }}>{error}</span>}
-        </div>
-      </div>
-
-      <div style={{ position: "sticky", top: 16 }}>
-        <h2 style={{ fontSize: 16 }}>プレビュー</h2>
+      <Section title="プレビュー">
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <button onClick={() => setPreviewDevice("pc")} disabled={previewDevice === "pc"}>
             PC
@@ -436,17 +426,65 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
           </div>
         )}
         {previewCreative ? (
-          <PreviewPanel
-            creative={previewCreative}
-            device={previewDevice}
-            positionPc={positionPc}
-            positionSp="center"
-            overlay={overlay}
-            closeButton={closeButton}
-          />
+          <>
+            <button
+              onClick={() => setEnlarged(true)}
+              style={{ display: "block", padding: 0, border: "none", background: "none", cursor: "zoom-in" }}
+              aria-label="プレビューを拡大表示"
+            >
+              <PreviewPanel
+                creative={previewCreative}
+                device={previewDevice}
+                positionPc={positionPc}
+                positionSp="center"
+                overlay={overlay}
+                closeButton={closeButton}
+              />
+            </button>
+            <p style={{ color: "#888", fontSize: 12, marginTop: 4 }}>クリックで拡大表示</p>
+            {enlarged && (
+              <div
+                onClick={() => setEnlarged(false)}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.6)",
+                  zIndex: 1000,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 16,
+                }}
+              >
+                <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 8, padding: 16, maxWidth: "95vw", maxHeight: "90vh", overflow: "auto" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <strong>プレビュー拡大表示</strong>
+                    <button onClick={() => setEnlarged(false)}>閉じる</button>
+                  </div>
+                  <PreviewPanel
+                    creative={previewCreative}
+                    device={previewDevice}
+                    positionPc={positionPc}
+                    positionSp="center"
+                    overlay={overlay}
+                    closeButton={closeButton}
+                    scale={ENLARGED_SCALE[previewDevice]}
+                  />
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <p style={{ color: "#888" }}>クリエイティブを追加するとプレビューできます。</p>
         )}
+      </Section>
+
+      <div style={{ marginTop: 16 }}>
+        <button onClick={handleSave} disabled={saving} style={{ padding: "10px 24px" }}>
+          {saving ? "保存中..." : "保存"}
+        </button>
+        {savedAt && <span style={{ marginLeft: 12, color: "green" }}>保存しました</span>}
+        {error && <span style={{ marginLeft: 12, color: "crimson" }}>{error}</span>}
       </div>
     </div>
   );

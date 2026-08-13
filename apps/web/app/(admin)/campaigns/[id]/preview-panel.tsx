@@ -11,6 +11,8 @@ interface Props {
   positionSp: PositionSp;
   overlay: boolean;
   closeButton: boolean;
+  /** Overrides DISPLAY_SCALE below — used to render a bigger version in the "拡大表示" modal. */
+  scale?: number;
 }
 
 // True-to-life viewport sizes, not the smaller box this panel used to use.
@@ -32,6 +34,9 @@ const FRAME_SIZE: Record<Device, { width: number; height: number }> = {
 // fits inline next to the edit form — transforms don't affect layout size,
 // so this doesn't change what the container query sees.
 const DISPLAY_SCALE: Record<Device, number> = { sp: 1, pc: 0.375, tablet: 0.45 };
+
+/** Bigger, but still capped so a 1280px-wide PC frame fits a typical laptop screen. Used by the "拡大表示" modal. */
+export const ENLARGED_SCALE: Record<Device, number> = { sp: 1, pc: 0.65, tablet: 0.75 };
 
 /**
  * Renders through the exact same `renderPopup` the live SDK uses
@@ -68,7 +73,7 @@ export function PreviewPanel(props: Props) {
   }, [props.creative, props.device, props.positionPc, props.positionSp, props.overlay, props.closeButton]);
 
   const frame = FRAME_SIZE[props.device];
-  const scale = DISPLAY_SCALE[props.device];
+  const scale = props.scale ?? DISPLAY_SCALE[props.device];
 
   return (
     <div
