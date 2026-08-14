@@ -68,13 +68,19 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
       position: ${positionKeyword}; inset: 0; background: rgba(0,0,0,0.5);
       z-index: 2147483000;
     }
+    .pz-center-wrap {
+      position: ${positionKeyword}; inset: 0; z-index: 2147483001;
+      display: grid; place-items: center; pointer-events: none;
+    }
+    .pz-center-wrap .pz-banner { pointer-events: auto; }
     .pz-banner {
-      position: ${positionKeyword}; z-index: 2147483001;
+      position: ${isCentered ? "relative" : positionKeyword};
+      ${isCentered ? "" : "z-index: 2147483001;"}
       max-width: ${maxWidth};
       width: min(86${widthUnit}, ${maxWidth});
       box-shadow: 0 4px 24px rgba(0,0,0,0.2);
       border-radius: 8px; overflow: hidden; background: #fff;
-      ${POSITION_STYLES[position]}
+      ${isCentered ? "" : POSITION_STYLES[position]}
     }
     .pz-banner a { display: block; }
     .pz-banner img { width: 100%; height: auto; display: block; }
@@ -94,6 +100,19 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
     overlayEl.className = "pz-overlay";
     overlayEl.setAttribute("role", "presentation");
     shadow.appendChild(overlayEl);
+  }
+
+  // Centered positioning needs a full-viewport wrapper to place the banner
+  // in the middle of the screen, kept separate from `.pz-banner` itself —
+  // sizing `.pz-banner` to `inset:0` (as a single "center" rule reused for
+  // both would) made its own background span the whole viewport instead of
+  // hugging the creative image, and dragged the close button's corner
+  // along with it. Non-centered positions never had this problem: they
+  // anchor `.pz-banner` directly via `POSITION_STYLES`, sized to content.
+  const centerWrap = isCentered ? document.createElement("div") : null;
+  if (centerWrap) {
+    centerWrap.className = "pz-center-wrap";
+    shadow.appendChild(centerWrap);
   }
 
   const banner = document.createElement("div");
@@ -125,7 +144,7 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
     banner.appendChild(closeBtn);
   }
 
-  shadow.appendChild(banner);
+  (centerWrap ?? shadow).appendChild(banner);
 
   function handleClick(e: MouseEvent) {
     e.preventDefault();
