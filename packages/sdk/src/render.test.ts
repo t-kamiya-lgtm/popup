@@ -106,3 +106,51 @@ describe("renderPopup with linkAction: close", () => {
     popup.destroy();
   });
 });
+
+describe("renderPopup url clicks", () => {
+  it("closes after opening a normal (_blank) link too, not just linkAction: close", () => {
+    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = class {
+      observe() {}
+      disconnect() {}
+    };
+    // _blank goes through window.open rather than location.href, which
+    // jsdom doesn't implement navigation for — mock it instead of hitting
+    // a "not implemented" error.
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    const onClick = vi.fn();
+    const onClose = vi.fn();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const captured: { shadow: ShadowRoot | null } = { shadow: null };
+    const originalAttachShadow = host.attachShadow.bind(host);
+    vi.spyOn(host, "attachShadow").mockImplementation((init) => {
+      captured.shadow = originalAttachShadow({ ...(init as ShadowRootInit), mode: "open" });
+      return captured.shadow;
+    });
+
+    const popup = renderPopup(host, {
+      creative: BASE_CREATIVE, // linkTarget: "_blank", no linkAction — the normal case
+      device: "sp",
+      positionPc: "bottom_right",
+      positionSp: "center",
+      overlay: false,
+      closeButton: false,
+      onVisible: () => {},
+      onClick,
+      onClose,
+    });
+
+    const link = captured.shadow?.querySelector("a");
+    link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1); // closes even though this isn't linkAction: close
+    expect(host.isConnected).toBe(false);
+
+    popup.destroy();
+    openSpy.mockRestore();
+  });
+});

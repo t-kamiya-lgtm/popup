@@ -155,6 +155,9 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
       close();
       return;
     }
+    // Preview-only: leave the popup rendered so the admin can click it
+    // repeatedly to inspect it, rather than having it disappear with no
+    // trigger to bring it back (see disableNavigation's doc comment).
     if (opts.disableNavigation) return;
     const destination = forwardQueryParams(opts.creative.linkUrl, location.href);
     // sendBeacon (used by onClick's collector call) doesn't block
@@ -164,6 +167,12 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
     } else {
       location.href = destination;
     }
+    // Always close, not just on the × button: a new tab (_blank) or a
+    // same-page anchor jump (e.g. "#order-form", which the browser just
+    // scrolls to rather than reloading for) would otherwise leave this
+    // popup sitting on screen indefinitely — a full-page navigation closing
+    // it too is harmless, since the page is unloading anyway.
+    close();
   }
   link.addEventListener("click", handleClick);
 
