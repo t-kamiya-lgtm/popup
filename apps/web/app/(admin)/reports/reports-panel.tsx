@@ -59,7 +59,7 @@ export function ReportsPanel() {
 
   const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
   const [brandId, setBrandId] = useState("");
-  const [pageGroupId, setPageGroupId] = useState("");
+  const [pagePattern, setPagePattern] = useState("");
   const [creativeId, setCreativeId] = useState("");
 
   useEffect(() => {
@@ -78,7 +78,7 @@ export function ReportsPanel() {
     setError(null);
     const params = new URLSearchParams({ from: range.from.toISOString(), to: range.to.toISOString() });
     if (brandId) params.set("brandId", brandId);
-    if (pageGroupId) params.set("pageGroupId", pageGroupId);
+    if (pagePattern) params.set("pagePattern", pagePattern);
     if (creativeId) params.set("creativeId", creativeId);
     fetch(`/api/v1/reports?${params}`)
       .then(async (res) => {
@@ -88,7 +88,7 @@ export function ReportsPanel() {
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [range, brandId, pageGroupId, creativeId]);
+  }, [range, brandId, pagePattern, creativeId]);
 
   function handlePresetChange(p: Preset) {
     setPreset(p);
@@ -109,8 +109,8 @@ export function ReportsPanel() {
     );
     lines.push("");
     lines.push("ページ別");
-    lines.push("ページグループ,imp,click,CTR");
-    for (const p of data.pageGroups) lines.push([p.name, p.imps, p.clicks, pct(p.ctr)].join(","));
+    lines.push("対象ページURLルール,imp,click,CTR");
+    for (const p of data.pages) lines.push([`"${p.pattern}"`, p.imps, p.clicks, pct(p.ctr)].join(","));
     lines.push("");
     lines.push("ブランド別");
     lines.push("ブランド,imp,click,CTR,CV,CVR,売上");
@@ -125,10 +125,10 @@ export function ReportsPanel() {
     }
     lines.push("");
     lines.push("詳細データ（ブランド×ページ×クリエイティブ）");
-    lines.push("ブランド,ページグループ,クリエイティブ,imp,click,CTR,CV,CVR,売上");
+    lines.push("ブランド,対象ページURLルール,クリエイティブ,imp,click,CTR,CV,CVR,売上");
     for (const d of data.details) {
       lines.push(
-        [`"${d.brandName}"`, `"${d.pageGroupName}"`, `"${d.creativeName}"`, d.imps, d.clicks, pct(d.ctr), d.cvs, pct(d.cvr), d.revenue].join(",")
+        [`"${d.brandName}"`, `"${d.pagePattern}"`, `"${d.creativeName}"`, d.imps, d.clicks, pct(d.ctr), d.cvs, pct(d.cvr), d.revenue].join(",")
       );
     }
 
@@ -182,11 +182,11 @@ export function ReportsPanel() {
             </option>
           ))}
         </select>
-        <select value={pageGroupId} onChange={(e) => setPageGroupId(e.target.value)}>
+        <select value={pagePattern} onChange={(e) => setPagePattern(e.target.value)}>
           <option value="">ページ: すべて</option>
-          {filterOptions?.pageGroups.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
+          {filterOptions?.pages.map((p) => (
+            <option key={p} value={p}>
+              {p}
             </option>
           ))}
         </select>
@@ -198,11 +198,11 @@ export function ReportsPanel() {
             </option>
           ))}
         </select>
-        {(brandId || pageGroupId || creativeId) && (
+        {(brandId || pagePattern || creativeId) && (
           <button
             onClick={() => {
               setBrandId("");
-              setPageGroupId("");
+              setPagePattern("");
               setCreativeId("");
             }}
           >
@@ -226,9 +226,13 @@ export function ReportsPanel() {
           </div>
 
           <Section title="ページ別（imp / click）">
+            <p style={{ color: "#666", fontSize: 13 }}>
+              各キャンペーンの「②対象ページ（URLルール）」に一致したページ単位の集計です。
+              どのルールにも一致しない場合は「その他」に入ります（正規表現ルールは対象外です）。
+            </p>
             <Table
-              head={["ページグループ", "imp", "click", "CTR"]}
-              rows={data.pageGroups.map((p) => [p.name, p.imps.toLocaleString("ja-JP"), p.clicks.toLocaleString("ja-JP"), pct(p.ctr)])}
+              head={["対象ページURLルール", "imp", "click", "CTR"]}
+              rows={data.pages.map((p) => [p.pattern, p.imps.toLocaleString("ja-JP"), p.clicks.toLocaleString("ja-JP"), pct(p.ctr)])}
               empty="データがありません"
             />
           </Section>
@@ -275,14 +279,15 @@ export function ReportsPanel() {
 
           <Section title="詳細データ（ブランド × ページ × クリエイティブ）">
             <p style={{ color: "#666", fontSize: 13 }}>
-              ブランド・接触した表示位置（ページグループ）・クリエイティブの組み合わせでimp/click/CVをまとめて集計します。
-              ページグループは接触時点のもののみ記録されるため、この機能の追加前に発生したイベントは「（ページ不明）」に入ります。
+              ブランド・接触した対象ページ（URLルール）・クリエイティブの組み合わせでimp/click/CVをまとめて集計します。
+              CVはサンクスページで発生しページ情報を持たないため常に「（ページ不明）」に入ります
+              （imp/クリックはその都度のページから正しく分類されます）。
             </p>
             <Table
-              head={["ブランド", "ページグループ", "クリエイティブ", "imp", "click", "CTR", "CV", "CVR", "売上"]}
+              head={["ブランド", "対象ページURLルール", "クリエイティブ", "imp", "click", "CTR", "CV", "CVR", "売上"]}
               rows={data.details.map((d) => [
                 d.brandName,
-                d.pageGroupName,
+                d.pagePattern,
                 d.creativeName,
                 d.imps.toLocaleString("ja-JP"),
                 d.clicks.toLocaleString("ja-JP"),

@@ -5,7 +5,7 @@ import { getCurrentSite } from "@/lib/current-site";
 import { getReportData, type ReportFilters } from "@/lib/reports";
 
 /**
- * GET /api/v1/reports?from=YYYY-MM-DD&to=YYYY-MM-DD[&brandId=..&pageGroupId=..&creativeId=..]
+ * GET /api/v1/reports?from=YYYY-MM-DD&to=YYYY-MM-DD[&brandId=..&pagePattern=..&creativeId=..]
  * docs/06-admin.md 5. `to` is exclusive.
  */
 export async function GET(req: NextRequest) {
@@ -24,8 +24,8 @@ export async function GET(req: NextRequest) {
   const filters: ReportFilters = {};
   const brandId = params.get("brandId");
   if (brandId) filters.brandId = Number(brandId);
-  const pageGroupId = params.get("pageGroupId");
-  if (pageGroupId) filters.pageGroupId = Number(pageGroupId);
+  const pagePattern = params.get("pagePattern");
+  if (pagePattern) filters.pagePattern = pagePattern;
   const creativeId = params.get("creativeId");
   if (creativeId) filters.creativeId = Number(creativeId);
 
