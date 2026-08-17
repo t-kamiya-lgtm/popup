@@ -81,7 +81,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ sit
     const exclude = targetRows.filter((t) => t.kind === "exclude").map((t) => ({ match: t.match_type, pattern: t.pattern }));
 
     const { rows: creativeRows } = await servicePool().query(
-      `SELECT id, weight, link_url, link_target, alt_text, asset_pc_id, asset_sp_id FROM creatives
+      `SELECT id, weight, link_url, link_target, link_action, alt_text, asset_pc_id, asset_sp_id FROM creatives
        WHERE campaign_id = $1 AND status = 'active'`,
       [c.id]
     );
@@ -98,8 +98,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ sit
         return {
           id: Number(cr.id),
           weight: cr.weight,
-          linkUrl: cr.link_url,
+          linkUrl: cr.link_url ?? "",
           linkTarget: cr.link_target,
+          linkAction: cr.link_action,
           alt: cr.alt_text,
           images: {
             pc: pc ?? EMPTY_IMAGE,

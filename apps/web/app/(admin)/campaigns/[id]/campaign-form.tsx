@@ -104,7 +104,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
           overlay,
           closeButton,
           targets: normalizedTargets,
-          creatives: creatives.filter((c) => c.linkUrl.trim() !== ""),
+          creatives: creatives.filter((c) => c.linkAction === "close" || c.linkUrl.trim() !== ""),
         }),
       });
       if (!res.ok) {
@@ -126,6 +126,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
       weight: 1,
       linkUrl: c.linkUrl,
       linkTarget: c.linkTarget as "_self" | "_blank",
+      linkAction: c.linkAction,
       alt: c.altText,
       images: {
         // Falls back to the same empty placeholder the live config JSON
@@ -344,12 +345,32 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
                 </select>
                 <button onClick={() => setCreatives(creatives.filter((_, idx) => idx !== i))}>削除</button>
               </div>
-              <input
-                value={c.linkUrl}
-                onChange={(e) => updateCreative(i, { linkUrl: e.target.value })}
-                placeholder="https://..."
-                style={{ ...inputStyle, width: "100%", marginBottom: 8 }}
-              />
+              <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
+                <label style={{ ...checkboxLabel, marginBottom: 0 }}>
+                  <input
+                    type="radio"
+                    checked={(c.linkAction ?? "url") === "url"}
+                    onChange={() => updateCreative(i, { linkAction: "url" })}
+                  />
+                  リンク先URLへ遷移
+                </label>
+                <label style={{ ...checkboxLabel, marginBottom: 0 }}>
+                  <input
+                    type="radio"
+                    checked={c.linkAction === "close"}
+                    onChange={() => updateCreative(i, { linkAction: "close" })}
+                  />
+                  元のページに戻る（閉じる）
+                </label>
+              </div>
+              {(c.linkAction ?? "url") === "url" && (
+                <input
+                  value={c.linkUrl}
+                  onChange={(e) => updateCreative(i, { linkUrl: e.target.value })}
+                  placeholder="https://..."
+                  style={{ ...inputStyle, width: "100%", marginBottom: 8 }}
+                />
+              )}
               <input
                 value={c.altText}
                 onChange={(e) => updateCreative(i, { altText: e.target.value })}
@@ -392,6 +413,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
                   status: "active",
                   linkUrl: "",
                   linkTarget: "_blank",
+                  linkAction: "url",
                   altText: "",
                   weight: 1,
                   assetPcId: null,

@@ -28,6 +28,7 @@ export interface CampaignDetail {
     status: string;
     linkUrl: string;
     linkTarget: string;
+    linkAction: "url" | "close";
     altText: string;
     weight: number;
     assetPcId: number | null;
@@ -53,7 +54,7 @@ export async function getCampaignDetail(client: PoolClient, campaignId: number):
     [campaignId]
   );
   const { rows: creativeRows } = await client.query(
-    `SELECT id, name, status, link_url, link_target, alt_text, weight, asset_pc_id, asset_sp_id
+    `SELECT id, name, status, link_url, link_target, link_action, alt_text, weight, asset_pc_id, asset_sp_id
      FROM creatives WHERE campaign_id = $1 ORDER BY id`,
     [campaignId]
   );
@@ -66,8 +67,9 @@ export async function getCampaignDetail(client: PoolClient, campaignId: number):
         id: Number(cr.id),
         name: cr.name,
         status: cr.status,
-        linkUrl: cr.link_url,
+        linkUrl: cr.link_url ?? "",
         linkTarget: cr.link_target,
+        linkAction: cr.link_action,
         altText: cr.alt_text,
         weight: cr.weight,
         assetPcId,

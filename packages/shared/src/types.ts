@@ -66,6 +66,8 @@ export interface CreativeConfig {
   weight: number;
   linkUrl: string;
   linkTarget: "_self" | "_blank";
+  /** "close" makes a click behave like the × button (dismiss, no navigation) instead of following linkUrl. Defaults to "url" when absent. */
+  linkAction?: "url" | "close";
   alt: string;
   images: {
     pc: ImageVariant;

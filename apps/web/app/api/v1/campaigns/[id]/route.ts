@@ -16,6 +16,7 @@ interface CreativeInput {
   status: "active" | "paused";
   linkUrl: string;
   linkTarget: "_self" | "_blank";
+  linkAction?: "url" | "close";
   altText: string;
   weight: number;
   assetPcId: number | null;
@@ -123,20 +124,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const submittedIds = new Set<number>();
 
     for (const cr of body.creatives ?? []) {
-      if (!cr.linkUrl) continue;
+      const linkAction = cr.linkAction === "close" ? "close" : "url";
+      if (linkAction === "url" && !cr.linkUrl) continue; // a "close" creative has no URL to require
+      const linkUrl = linkAction === "close" ? null : cr.linkUrl;
       if (cr.id && existingIds.has(cr.id)) {
         submittedIds.add(cr.id);
         await client.query(
-          `UPDATE creatives SET name=$2, status=$3, link_url=$4, link_target=$5, alt_text=$6, weight=$7,
-             asset_pc_id=$8, asset_sp_id=$9
-           WHERE id = $1 AND campaign_id = $10`,
-          [cr.id, cr.name, cr.status, cr.linkUrl, cr.linkTarget, cr.altText, cr.weight, cr.assetPcId, cr.assetSpId, campaignId]
+          `UPDATE creatives SET name=$2, status=$3, link_url=$4, link_target=$5, link_action=$6, alt_text=$7, weight=$8,
+             asset_pc_id=$9, asset_sp_id=$10
+           WHERE id = $1 AND campaign_id = $11`,
+          [cr.id, cr.name, cr.status, linkUrl, cr.linkTarget, linkAction, cr.altText, cr.weight, cr.assetPcId, cr.assetSpId, campaignId]
         );
       } else {
         await client.query(
-          `INSERT INTO creatives (campaign_id, name, status, link_url, link_target, alt_text, weight, asset_pc_id, asset_sp_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [campaignId, cr.name, cr.status, cr.linkUrl, cr.linkTarget, cr.altText, cr.weight, cr.assetPcId, cr.assetSpId]
+          `INSERT INTO creatives (campaign_id, name, status, link_url, link_target, link_action, alt_text, weight, asset_pc_id, asset_sp_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [campaignId, cr.name, cr.status, linkUrl, cr.linkTarget, linkAction, cr.altText, cr.weight, cr.assetPcId, cr.assetSpId]
         );
       }
     }

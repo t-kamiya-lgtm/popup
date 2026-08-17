@@ -82,7 +82,7 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
       border-radius: 8px; overflow: hidden; background: #fff;
       ${isCentered ? "" : POSITION_STYLES[position]}
     }
-    .pz-banner a { display: block; }
+    .pz-banner a { display: block; cursor: pointer; }
     .pz-banner img { width: 100%; height: auto; display: block; }
     .pz-close {
       position: absolute; top: 4px; right: 4px;
@@ -121,8 +121,10 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
   if (isCentered) banner.setAttribute("aria-modal", "true");
   banner.setAttribute("aria-label", opts.creative.alt || "広告");
 
+  const isCloseAction = opts.creative.linkAction === "close";
+
   const link = document.createElement("a");
-  link.href = opts.creative.linkUrl;
+  if (!isCloseAction) link.href = opts.creative.linkUrl;
   link.target = opts.creative.linkTarget;
   link.rel = "noopener";
 
@@ -149,6 +151,10 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
   function handleClick(e: MouseEvent) {
     e.preventDefault();
     opts.onClick();
+    if (isCloseAction) {
+      close();
+      return;
+    }
     if (opts.disableNavigation) return;
     const destination = forwardQueryParams(opts.creative.linkUrl, location.href);
     // sendBeacon (used by onClick's collector call) doesn't block
