@@ -26,7 +26,7 @@ interface TouchInfo {
   crid?: number;
   type?: "click" | "view";
   ts?: number;
-  pg?: number; // page_group id the touch happened on — carried onto the CV row for 実績レポート's item×page×creative breakdown
+  path?: string; // location.pathname the touch happened on — carried onto the CV row's page_path, since a CV fires on the thank-you page and has no page of its own (実績レポート's brand×page×creative breakdown)
 }
 
 interface IncomingEvent {
@@ -202,7 +202,7 @@ async function insertCvEvent(
     await client.query(
       `INSERT INTO events (
          event_id, occurred_at, account_id, site_id, event_type,
-         campaign_id, creative_id, page_group_id, order_id, revenue, attribution, latency_sec
+         campaign_id, creative_id, page_path, order_id, revenue, attribution, latency_sec
        ) VALUES ($1,$2,$3,$4,'cv',$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (event_id, occurred_at) DO NOTHING`,
       [
@@ -212,7 +212,7 @@ async function insertCvEvent(
         site.id,
         event.touch?.cid ?? null,
         event.touch?.crid ?? null,
-        event.touch?.pg ?? null,
+        safeTouchPath(event.touch?.path),
         event.orderId,
         event.revenueExTax ?? null,
         attribution,
@@ -271,6 +271,15 @@ function safePath(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+// `touch.path` is a bare pathname (not a full URL — see TouchInfo), sent
+// straight from the SDK's own `location.pathname`, but this endpoint is
+// unauthenticated so it's still untrusted input: reject anything that
+// isn't a plausible, bounded pathname rather than storing it as-is.
+function safeTouchPath(path: string | undefined): string | null {
+  if (typeof path !== "string" || !path.startsWith("/") || path.length > 2048) return null;
+  return path;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

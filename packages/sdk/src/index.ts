@@ -53,7 +53,7 @@ async function main() {
     if (campaign) {
       const creative = pickCreative(session.id, campaign.id, campaign.creatives);
       if (creative) {
-        showPopup(config, campaign, creative, device, pageGroup?.id, visitorId, session.id, "preview", { record: false });
+        showPopup(config, campaign, creative, device, pageGroup?.id, path, visitorId, session.id, "preview", { record: false });
       }
     }
     return;
@@ -93,7 +93,7 @@ async function main() {
   preloadImage(device === "pc" ? creative.images.pc.fallback : creative.images.sp.fallback);
 
   registerTriggers(campaign.triggers, session.startedAt, (triggerType) => {
-    showPopup(config, campaign, creative, device, pageGroup?.id, visitorId, session.id, triggerType);
+    showPopup(config, campaign, creative, device, pageGroup?.id, path, visitorId, session.id, triggerType);
   });
 }
 
@@ -103,6 +103,7 @@ function showPopup(
   creative: CreativeConfig,
   device: ReturnType<typeof detectDevice>,
   pageGroupId: number | undefined,
+  path: string,
   visitorId: string,
   sessionId: string,
   triggerType: string,
@@ -123,7 +124,7 @@ function showPopup(
     onVisible: () => {
       if (!record) return;
       const now = Date.now();
-      addTouch({ cid: campaign.id, crid: creative.id, type: "view", ts: now, pg: pageGroupId });
+      addTouch({ cid: campaign.id, crid: creative.id, type: "view", ts: now, path });
       persistFrequency(campaign.id, (state) => recordShow(state, now, sessionId, localDayKey(new Date(now))));
       sendEvents(config.endpoints.collect, config.site.id, config.v, [
         {
@@ -145,7 +146,7 @@ function showPopup(
     onClick: () => {
       if (!record) return;
       const now = Date.now();
-      addTouch({ cid: campaign.id, crid: creative.id, type: "click", ts: now, pg: pageGroupId });
+      addTouch({ cid: campaign.id, crid: creative.id, type: "click", ts: now, path });
       persistFrequency(campaign.id, (state) => recordClick(state, now));
       sendEvents(config.endpoints.collect, config.site.id, config.v, [
         {
@@ -229,7 +230,7 @@ function installConversionQueue(config: SiteConfig, visitorId: string) {
         customerId: payload.customerId,
         revenueExTax: payload.revenueExTax,
         items: payload.items ?? [],
-        touch: touch ? { cid: touch.cid, crid: touch.crid, type: touch.type, ts: touch.ts, pg: touch.pg } : undefined,
+        touch: touch ? { cid: touch.cid, crid: touch.crid, type: touch.type, ts: touch.ts, path: touch.path } : undefined,
       },
     ]);
   }

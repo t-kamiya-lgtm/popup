@@ -91,11 +91,13 @@ function cvrOf(cvs: number, clicks: number): number {
  * campaign would take down every report query. They fall back to "その他"
  * like everything else that doesn't match.
  *
- * CV events have no page_path at all (they fire on the thank-you page, not
- * the LP the touch happened on — docs/09-cart-integration.md 3), so they
- * always fall back too. Carrying the touch's original page through to CV
- * is a bigger change (packages/sdk's touch storage + collector wire
- * format) left for later.
+ * CV events fire on the thank-you page, not the LP the touch happened on
+ * (docs/09-cart-integration.md 3), so their page_path comes from the
+ * *attributed touch* instead — packages/sdk's storage.ts carries
+ * location.pathname on each touch, and apps/web/app/e/route.ts's
+ * insertCvEvent writes it onto the CV row's page_path. A CV with no
+ * attributed touch (nothing in the click/view attribution window) has no
+ * page_path and falls back like anything else that doesn't match.
  *
  * A CTE (not a bare LATERAL after the fact) because the creatives query
  * below needs to filter *which events count* by the resolved pattern from
