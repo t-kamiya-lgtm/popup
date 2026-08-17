@@ -32,7 +32,7 @@ ${email} 様
 `;
 }
 
-export function MembersPanel({ accountId }: { accountId: number }) {
+export function MembersPanel({ accountId, isOwner }: { accountId: number; isOwner: boolean }) {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Member["role"]>("editor");
@@ -40,6 +40,7 @@ export function MembersPanel({ accountId }: { accountId: number }) {
   const [error, setError] = useState<string | null>(null);
   const [inviteTextFor, setInviteTextFor] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [removingEmail, setRemovingEmail] = useState<string | null>(null);
 
   async function load() {
     const res = await fetch(`/api/v1/accounts/${accountId}/members`);
@@ -81,6 +82,32 @@ export function MembersPanel({ accountId }: { accountId: number }) {
     } catch {
       // Clipboard API can be unavailable/blocked; the textarea below is
       // already selectable, so manual copy still works either way.
+    }
+  }
+
+  async function handleRemove(m: Member) {
+    const confirmMsg =
+      m.status === "invited"
+        ? `${m.email} への招待をキャンセルします。よろしいですか？`
+        : `${m.email} をメンバーから削除します。よろしいですか？`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setRemovingEmail(m.email);
+    setError(null);
+    try {
+      const res = await fetch(`/api/v1/accounts/${accountId}/members`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: m.email }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error ?? "削除に失敗しました");
+        return;
+      }
+      await load();
+    } finally {
+      setRemovingEmail(null);
     }
   }
 
@@ -150,7 +177,7 @@ export function MembersPanel({ accountId }: { accountId: number }) {
                 <td style={{ padding: "8px 4px", color: m.status === "invited" ? "#b8860b" : "#2a7" }}>
                   {STATUS_LABEL[m.status]}
                 </td>
-                <td style={{ padding: "8px 4px" }}>
+                <td style={{ padding: "8px 4px", whiteSpace: "nowrap" }}>
                   {m.status === "invited" && (
                     <button
                       type="button"
@@ -158,9 +185,19 @@ export function MembersPanel({ accountId }: { accountId: number }) {
                         setInviteTextFor(m.email);
                         setCopied(false);
                       }}
-                      style={{ fontSize: 12 }}
+                      style={{ fontSize: 12, marginRight: 8 }}
                     >
                       招待文を表示
+                    </button>
+                  )}
+                  {isOwner && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(m)}
+                      disabled={removingEmail === m.email}
+                      style={{ fontSize: 12, color: "crimson" }}
+                    >
+                      {removingEmail === m.email ? "削除中..." : m.status === "invited" ? "招待をキャンセル" : "削除"}
                     </button>
                   )}
                 </td>

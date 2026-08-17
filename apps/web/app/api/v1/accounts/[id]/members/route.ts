@@ -85,3 +85,53 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: true }, { status: 201 });
   });
 }
+
+/**
+ * DELETE /api/v1/accounts/{id}/members — cancel a pending invite or remove
+ * an existing member, by email. Owner-only, same as POST. Refuses to
+ * remove the account's last accepted owner so the account can never end up
+ * with nobody able to manage membership.
+ */
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const accountId = await requireAccountId();
+  if (accountId instanceof NextResponse) return accountId;
+  const { id } = await params;
+  if (Number(id) !== accountId) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  const session = await getSession();
+  if (!session.userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => null);
+  const email = typeof body?.email === "string" ? body.email.trim() : "";
+  if (!email) return NextResponse.json({ error: "invalid payload" }, { status: 400 });
+
+  return withAccount(accountId, async (client) => {
+    if (!(await requireOwner(client, session.userId!))) {
+      return NextResponse.json({ error: "削除できるのはオーナー権限のメンバーのみです" }, { status: 403 });
+    }
+
+    const {
+      rows: [target],
+    } = await client.query(
+      `SELECT m.id, m.role FROM memberships m JOIN users u ON u.id = m.user_id
+       WHERE m.account_id = $1 AND u.email = $2`,
+      [accountId, email]
+    );
+    if (!target) return NextResponse.json({ error: "見つかりません" }, { status: 404 });
+
+    if (target.role === "owner") {
+      const {
+        rows: [{ count }],
+      } = await client.query(
+        `SELECT count(*) FROM memberships WHERE account_id = $1 AND role = 'owner' AND accepted_at IS NOT NULL`,
+        [accountId]
+      );
+      if (Number(count) <= 1) {
+        return NextResponse.json({ error: "最後のオーナーは削除できません" }, { status: 400 });
+      }
+    }
+
+    await client.query(`DELETE FROM memberships WHERE id = $1`, [target.id]);
+    return NextResponse.json({ ok: true });
+  });
+}
