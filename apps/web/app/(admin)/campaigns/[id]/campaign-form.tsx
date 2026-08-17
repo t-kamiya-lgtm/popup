@@ -187,6 +187,12 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
             商品コード指定はできません（`docs/09-cart-integration.md` 1.3
             の確認結果、ページ側に確実な商品コードが無いため）。
           </p>
+          {initial.siteHost && (
+            <p style={{ color: "#666", fontSize: 13 }}>
+              各行の「プレビュー」は実際のページを新しいタブで開き、トリガー・表示回数上限・対照群を無視してポップアップを強制表示します（計測には含まれません）。
+              未保存の変更（表示位置・クリエイティブなど）は反映されないため、確認前に一度保存してください。
+            </p>
+          )}
           {targets.map((t, i) => (
             <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <select
@@ -213,6 +219,11 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
                 placeholder="/products/"
                 style={{ ...inputStyle, flex: 1 }}
               />
+              {previewUrl(t) && (
+                <a href={previewUrl(t)!} target="_blank" rel="noopener noreferrer">
+                  <button type="button">プレビュー</button>
+                </a>
+              )}
               <button onClick={() => setTargets(targets.filter((_, idx) => idx !== i))}>削除</button>
             </div>
           ))}
@@ -525,6 +536,20 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
 
   function updateTarget(i: number, patch: Partial<Target>) {
     setTargets(targets.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  }
+
+  // Only "含める" rows have a page-specific preview: an "除外" pattern is a
+  // page the popup should *not* show on, and a regex pattern isn't
+  // generally a real, openable path.
+  function previewUrl(t: Target): string | null {
+    if (!initial.siteHost || t.kind !== "include" || t.matchType === "regex" || !t.pattern.trim()) return null;
+    try {
+      const url = new URL(t.pattern, `https://${initial.siteHost}`);
+      url.searchParams.set("pz_preview", String(initial.id));
+      return url.toString();
+    } catch {
+      return null;
+    }
   }
 
   function updateCreative(i: number, patch: Partial<Creative>) {

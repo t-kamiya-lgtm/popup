@@ -40,6 +40,25 @@ async function main() {
 
   installConversionQueue(config, visitorId);
 
+  // Preview mode (docs/06-admin.md's per-target-page "プレビュー" links):
+  // ?pz_preview=<campaignId> on a real page forces that one campaign's
+  // popup to render immediately, ignoring device/target-page matching,
+  // frequency caps, holdout, and trigger wait — the whole point is letting
+  // an admin see the real, live-styled popup without needing to actually
+  // satisfy those conditions. `record: false` below keeps this out of
+  // imp/click/close analytics, since it isn't a real visitor interaction.
+  const previewCampaignId = getPreviewCampaignId();
+  if (previewCampaignId != null) {
+    const campaign = config.campaigns.find((c) => c.id === previewCampaignId && c.creatives.length > 0);
+    if (campaign) {
+      const creative = pickCreative(session.id, campaign.id, campaign.creatives);
+      if (creative) {
+        showPopup(config, campaign, creative, device, pageGroup?.id, visitorId, session.id, "preview", { record: false });
+      }
+    }
+    return;
+  }
+
   const candidates = config.campaigns
     .filter((c) => c.devices.includes(device))
     .filter((c) => matchesTargets(c.targets.urls, path))
@@ -86,8 +105,10 @@ function showPopup(
   pageGroupId: number | undefined,
   visitorId: string,
   sessionId: string,
-  triggerType: string
+  triggerType: string,
+  options: { record?: boolean } = {}
 ) {
+  const record = options.record ?? true;
   const host = document.createElement("div");
   host.style.all = "initial";
   document.body.appendChild(host);
@@ -100,6 +121,7 @@ function showPopup(
     overlay: campaign.render.overlay,
     closeButton: campaign.render.closeButton,
     onVisible: () => {
+      if (!record) return;
       const now = Date.now();
       addTouch({ cid: campaign.id, crid: creative.id, type: "view", ts: now, pg: pageGroupId });
       persistFrequency(campaign.id, (state) => recordShow(state, now, sessionId, localDayKey(new Date(now))));
@@ -121,6 +143,7 @@ function showPopup(
       ]);
     },
     onClick: () => {
+      if (!record) return;
       const now = Date.now();
       addTouch({ cid: campaign.id, crid: creative.id, type: "click", ts: now, pg: pageGroupId });
       persistFrequency(campaign.id, (state) => recordClick(state, now));
@@ -140,6 +163,7 @@ function showPopup(
       ]);
     },
     onClose: () => {
+      if (!record) return;
       const now = Date.now();
       persistFrequency(campaign.id, (state) => recordClose(state, now));
       sendEvents(config.endpoints.collect, config.site.id, config.v, [
@@ -147,6 +171,14 @@ function showPopup(
       ]);
     },
   });
+}
+
+/** ?pz_preview=<campaignId> — see the call site in main() for what this bypasses. */
+function getPreviewCampaignId(): number | null {
+  const raw = new URL(location.href).searchParams.get("pz_preview");
+  if (!raw) return null;
+  const id = Number(raw);
+  return Number.isInteger(id) ? id : null;
 }
 
 function persistFrequency(campaignId: number, update: (state: FrequencyState) => FrequencyState) {

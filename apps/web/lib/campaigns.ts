@@ -6,6 +6,8 @@ export interface CampaignDetail {
   id: number;
   name: string;
   status: "draft" | "active" | "paused" | "archived";
+  /** First entry of the site's allowed_hosts, used to build "実際のページでプレビュー" links. Null if the site has none configured. */
+  siteHost: string | null;
   priority: number;
   holdoutRate: number;
   devices: string[];
@@ -41,9 +43,10 @@ export interface CampaignDetail {
 /** Shared by the admin API route and the edit page's server component, so the two never drift. */
 export async function getCampaignDetail(client: PoolClient, campaignId: number): Promise<CampaignDetail | null> {
   const { rows: campaignRows } = await client.query(
-    `SELECT id, name, status, priority, holdout_rate, devices, triggers, frequency,
-            position_pc, position_sp, overlay, close_button
-     FROM campaigns WHERE id = $1`,
+    `SELECT c.id, c.name, c.status, c.priority, c.holdout_rate, c.devices, c.triggers, c.frequency,
+            c.position_pc, c.position_sp, c.overlay, c.close_button, s.allowed_hosts[1] AS site_host
+     FROM campaigns c JOIN sites s ON s.id = c.site_id
+     WHERE c.id = $1`,
     [campaignId]
   );
   const c = campaignRows[0];
@@ -84,6 +87,7 @@ export async function getCampaignDetail(client: PoolClient, campaignId: number):
     id: Number(c.id),
     name: c.name,
     status: c.status,
+    siteHost: c.site_host ?? null,
     priority: c.priority,
     holdoutRate: Number(c.holdout_rate),
     devices: c.devices,
