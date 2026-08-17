@@ -4,6 +4,7 @@ import type { CreativeConfig, Device, PositionPc } from "@popup/shared";
 import { useMemo, useState } from "react";
 import type { CampaignDetail } from "@/lib/campaigns";
 import { normalizeUrlPattern } from "@/lib/url-pattern";
+import { normalizeLinkUrl } from "@/lib/link-url";
 import { ENLARGED_SCALE, PreviewPanel } from "./preview-panel";
 
 interface UploadResponse {
@@ -88,6 +89,11 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
         .map((t) => ({ ...t, pattern: normalizeUrlPattern(t.pattern, t.matchType) }));
       setTargets(normalizedTargets);
 
+      const normalizedCreatives = creatives
+        .filter((c) => c.linkAction === "close" || c.linkUrl.trim() !== "")
+        .map((c) => (c.linkAction === "close" ? c : { ...c, linkUrl: normalizeLinkUrl(c.linkUrl) }));
+      setCreatives(normalizedCreatives);
+
       const res = await fetch(`/api/v1/campaigns/${initial.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -104,7 +110,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
           overlay,
           closeButton,
           targets: normalizedTargets,
-          creatives: creatives.filter((c) => c.linkAction === "close" || c.linkUrl.trim() !== ""),
+          creatives: normalizedCreatives,
         }),
       });
       if (!res.ok) {

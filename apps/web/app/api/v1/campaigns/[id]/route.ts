@@ -3,6 +3,7 @@ import { getCampaignDetail } from "@/lib/campaigns";
 import { withAccount } from "@/lib/db";
 import { requireAccountId } from "@/lib/require-account";
 import { normalizeUrlPattern } from "@/lib/url-pattern";
+import { normalizeLinkUrl } from "@/lib/link-url";
 
 interface TargetInput {
   kind: "include" | "exclude";
@@ -126,7 +127,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     for (const cr of body.creatives ?? []) {
       const linkAction = cr.linkAction === "close" ? "close" : "url";
       if (linkAction === "url" && !cr.linkUrl) continue; // a "close" creative has no URL to require
-      const linkUrl = linkAction === "close" ? null : cr.linkUrl;
+      const linkUrl = linkAction === "close" ? null : normalizeLinkUrl(cr.linkUrl);
       if (cr.id && existingIds.has(cr.id)) {
         submittedIds.add(cr.id);
         await client.query(
