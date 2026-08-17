@@ -125,10 +125,12 @@ export function ReportsPanel() {
     }
     lines.push("");
     lines.push("詳細データ（アイテム×ページ×クリエイティブ）");
-    lines.push("商品コード,商品名,ページグループ,クリエイティブ,CV(クリックスルー),CV(ビュースルー),売上");
+    lines.push("商品コード,商品名,ページグループ,クリエイティブ,imp,click,CV(クリックスルー),CV(ビュースルー),売上");
     for (const d of data.details) {
       lines.push(
-        [d.productCode ?? "", `"${d.productName}"`, `"${d.pageGroupName}"`, `"${d.creativeName}"`, d.cvClick, d.cvView, d.revenue].join(",")
+        [d.productCode ?? "", `"${d.productName}"`, `"${d.pageGroupName}"`, `"${d.creativeName}"`, d.imps, d.clicks, d.cvClick, d.cvView, d.revenue].join(
+          ","
+        )
       );
     }
 
@@ -281,14 +283,18 @@ export function ReportsPanel() {
             <p style={{ color: "#666", fontSize: 13 }}>
               CVごとに、購入商品・接触した表示位置（ページグループ）・クリエイティブの組み合わせで集計します。
               ページグループは接触時点のもののみ記録されるため、この機能の追加前に発生したCVは「（ページ不明）」に入ります。
+              imp/クリックは商品と紐付かないため、ページグループ・クリエイティブ単位の行として別途表示します
+              （商品名列は「－（imp/クリックのみ、商品と紐付きません）」）。
             </p>
             <Table
-              head={["商品コード", "商品名", "ページグループ", "クリエイティブ", "CV（クリックスルー）", "CV（ビュースルー）", "売上"]}
+              head={["商品コード", "商品名", "ページグループ", "クリエイティブ", "imp", "click", "CV（クリックスルー）", "CV（ビュースルー）", "売上"]}
               rows={data.details.map((d) => [
                 d.productCode ?? "—",
                 d.productName,
                 d.pageGroupName,
                 d.creativeName,
+                d.imps.toLocaleString("ja-JP"),
+                d.clicks.toLocaleString("ja-JP"),
                 d.cvClick.toLocaleString("ja-JP"),
                 d.cvView.toLocaleString("ja-JP"),
                 yen(d.revenue),

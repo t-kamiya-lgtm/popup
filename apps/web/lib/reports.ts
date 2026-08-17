@@ -42,6 +42,8 @@ export interface DetailRow {
   productName: string;
   pageGroupName: string;
   creativeName: string;
+  imps: number;
+  clicks: number;
   cvClick: number;
   cvView: number;
   revenue: number;
@@ -312,12 +314,14 @@ export async function getReportData(
     revenue: Number(r.revenue),
   }));
 
-  // Item x page x creative detail (requested addition): only possible for
-  // CV rows, since only CV events carry both a product (via order_items)
-  // and — as of the events.page_group_id backfill on CV rows added
-  // alongside this feature — the page the attributed touch happened on.
-  // CVs recorded before that change have page_group_id = NULL and show up
-  // grouped under "（ページ不明）" rather than being silently dropped.
+  // Item x page x creative detail (requested addition): item breakdown is
+  // only possible for CV rows, since only CV events carry both a product
+  // (via order_items) and — as of the events.page_group_id backfill on CV
+  // rows added alongside this feature — the page the attributed touch
+  // happened on. CVs recorded before that change have page_group_id = NULL
+  // and show up grouped under "（ページ不明）" rather than being silently
+  // dropped. imp/click rows (no CV) are added separately below, at the
+  // page x creative grain only — see the imp/click query further down.
   const detailParams: unknown[] = [siteId, from, to];
   let detailExtraSql = "";
   if (filters.pageGroupId != null) {
@@ -349,15 +353,66 @@ export async function getReportData(
      ORDER BY revenue DESC`,
     detailParams
   );
-  const details: DetailRow[] = detailRows.map((r) => ({
-    productCode: r.product_code,
-    productName: r.product_name,
-    pageGroupName: r.page_group_name,
-    creativeName: r.creative_name,
-    cvClick: Number(r.cv_click),
-    cvView: Number(r.cv_view),
-    revenue: Number(r.revenue),
-  }));
+
+  // imp/click rows for the same page x creative grain, shown alongside the
+  // CV/item rows above (requested addition — imp/click carry no product,
+  // so these always report productCode=null rather than being merged into
+  // an item row). Skipped entirely under a product filter, same as the
+  // summary/pageGroups/creatives sections above: a product filter has no
+  // meaning for events that aren't tied to a product.
+  const impClickDetailParams: unknown[] = [siteId, from, to];
+  let impClickDetailExtraSql = "";
+  if (filters.pageGroupId != null) {
+    impClickDetailParams.push(filters.pageGroupId);
+    impClickDetailExtraSql += ` AND e.page_group_id = $${impClickDetailParams.length}`;
+  }
+  if (filters.creativeId != null) {
+    impClickDetailParams.push(filters.creativeId);
+    impClickDetailExtraSql += ` AND e.creative_id = $${impClickDetailParams.length}`;
+  }
+  const impClickDetailRows = filters.productCode
+    ? []
+    : (
+        await client.query(
+          `SELECT coalesce(pg.name, '（ページ不明）') AS page_group_name,
+                  coalesce(c.name, '（削除済みクリエイティブ）') AS creative_name,
+                  count(*) FILTER (WHERE e.event_type = 'imp') AS imps,
+                  count(*) FILTER (WHERE e.event_type = 'click') AS clicks
+           FROM events e
+           LEFT JOIN page_groups pg ON pg.id = e.page_group_id
+           LEFT JOIN creatives c ON c.id = e.creative_id
+           WHERE e.site_id = $1 AND e.occurred_at >= $2 AND e.occurred_at < $3
+             AND e.event_type IN ('imp', 'click')${impClickDetailExtraSql}
+           GROUP BY pg.name, c.name
+           ORDER BY imps DESC`,
+          impClickDetailParams
+        )
+      ).rows;
+
+  const details: DetailRow[] = [
+    ...impClickDetailRows.map((r) => ({
+      productCode: null,
+      productName: "－（imp/クリックのみ、商品と紐付きません）",
+      pageGroupName: r.page_group_name,
+      creativeName: r.creative_name,
+      imps: Number(r.imps),
+      clicks: Number(r.clicks),
+      cvClick: 0,
+      cvView: 0,
+      revenue: 0,
+    })),
+    ...detailRows.map((r) => ({
+      productCode: r.product_code,
+      productName: r.product_name,
+      pageGroupName: r.page_group_name,
+      creativeName: r.creative_name,
+      imps: 0,
+      clicks: 0,
+      cvClick: Number(r.cv_click),
+      cvView: Number(r.cv_view),
+      revenue: Number(r.revenue),
+    })),
+  ];
 
   return { summary, pageGroups, products, creatives, details, crossDomainCart };
 }
