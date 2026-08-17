@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Popup Tool",
+  title: "ポップアップツール管理画面",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
