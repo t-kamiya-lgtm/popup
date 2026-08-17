@@ -58,7 +58,7 @@ export function ReportsPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
-  const [productCode, setProductCode] = useState("");
+  const [brandId, setBrandId] = useState("");
   const [pageGroupId, setPageGroupId] = useState("");
   const [creativeId, setCreativeId] = useState("");
 
@@ -77,7 +77,7 @@ export function ReportsPanel() {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ from: range.from.toISOString(), to: range.to.toISOString() });
-    if (productCode) params.set("productCode", productCode);
+    if (brandId) params.set("brandId", brandId);
     if (pageGroupId) params.set("pageGroupId", pageGroupId);
     if (creativeId) params.set("creativeId", creativeId);
     fetch(`/api/v1/reports?${params}`)
@@ -88,7 +88,7 @@ export function ReportsPanel() {
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [range, productCode, pageGroupId, creativeId]);
+  }, [range, brandId, pageGroupId, creativeId]);
 
   function handlePresetChange(p: Preset) {
     setPreset(p);
@@ -112,10 +112,10 @@ export function ReportsPanel() {
     lines.push("ページグループ,imp,click,CTR");
     for (const p of data.pageGroups) lines.push([p.name, p.imps, p.clicks, pct(p.ctr)].join(","));
     lines.push("");
-    lines.push("商品別");
-    lines.push(`商品コード,商品名,CV(クリックスルー),CV(ビュースルー),売上`);
-    for (const p of data.products) {
-      lines.push([p.productCode ?? "", `"${p.productName}"`, p.cvClick, p.cvView, p.revenue].join(","));
+    lines.push("ブランド別");
+    lines.push("ブランド,imp,click,CTR,CV,CVR,売上");
+    for (const b of data.brands) {
+      lines.push([`"${b.brandName}"`, b.imps, b.clicks, pct(b.ctr), b.cvs, pct(b.cvr), b.revenue].join(","));
     }
     lines.push("");
     lines.push("クリエイティブ別");
@@ -124,13 +124,11 @@ export function ReportsPanel() {
       lines.push([`"${c.name}"`, c.imps, c.clicks, pct(c.ctr), c.cvs, pct(c.cvr), c.revenue].join(","));
     }
     lines.push("");
-    lines.push("詳細データ（アイテム×ページ×クリエイティブ）");
-    lines.push("商品コード,商品名,ページグループ,クリエイティブ,imp,click,CV(クリックスルー),CV(ビュースルー),売上");
+    lines.push("詳細データ（ブランド×ページ×クリエイティブ）");
+    lines.push("ブランド,ページグループ,クリエイティブ,imp,click,CTR,CV,CVR,売上");
     for (const d of data.details) {
       lines.push(
-        [d.productCode ?? "", `"${d.productName}"`, `"${d.pageGroupName}"`, `"${d.creativeName}"`, d.imps, d.clicks, d.cvClick, d.cvView, d.revenue].join(
-          ","
-        )
+        [`"${d.brandName}"`, `"${d.pageGroupName}"`, `"${d.creativeName}"`, d.imps, d.clicks, pct(d.ctr), d.cvs, pct(d.cvr), d.revenue].join(",")
       );
     }
 
@@ -176,11 +174,11 @@ export function ReportsPanel() {
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 24 }}>
-        <select value={productCode} onChange={(e) => setProductCode(e.target.value)}>
-          <option value="">商品: すべて</option>
-          {filterOptions?.products.map((p) => (
-            <option key={p.code} value={p.code}>
-              {p.name ? `${p.code}（${p.name}）` : p.code}
+        <select value={brandId} onChange={(e) => setBrandId(e.target.value)}>
+          <option value="">ブランド: すべて</option>
+          {filterOptions?.brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
             </option>
           ))}
         </select>
@@ -200,10 +198,10 @@ export function ReportsPanel() {
             </option>
           ))}
         </select>
-        {(productCode || pageGroupId || creativeId) && (
+        {(brandId || pageGroupId || creativeId) && (
           <button
             onClick={() => {
-              setProductCode("");
+              setBrandId("");
               setPageGroupId("");
               setCreativeId("");
             }}
@@ -212,12 +210,6 @@ export function ReportsPanel() {
           </button>
         )}
       </div>
-      {productCode && (
-        <p style={{ color: "#666", fontSize: 13, marginTop: -16, marginBottom: 16 }}>
-          商品で絞り込み中のため、表示回数・クリック数・ページ別・クリエイティブ別は表示されません
-          （imp/click は商品と紐付いていないため）。
-        </p>
-      )}
 
       {loading && <p>読み込み中...</p>}
       {error && <p style={{ color: "crimson" }}>{error}</p>}
@@ -241,18 +233,20 @@ export function ReportsPanel() {
             />
           </Section>
 
-          <Section title="商品別（実売上）">
+          <Section title="ブランド別">
             <p style={{ color: "#666", fontSize: 13 }}>
-              商品はサンクスページのループタグから取得したコードで識別しているため、imp / click / CTR は持ちません。
+              各キャンペーンに設定した「ブランド」単位の集計です。未設定のキャンペーンは「（ブランド未設定）」に入ります。
             </p>
             <Table
-              head={["商品コード", "商品名", "CV（クリックスルー）", "CV（ビュースルー）", "売上"]}
-              rows={data.products.map((p) => [
-                p.productCode ?? "—",
-                p.productName,
-                p.cvClick.toLocaleString("ja-JP"),
-                p.cvView.toLocaleString("ja-JP"),
-                yen(p.revenue),
+              head={["ブランド", "imp", "click", "CTR", "CV", "CVR", "売上"]}
+              rows={data.brands.map((b) => [
+                b.brandName,
+                b.imps.toLocaleString("ja-JP"),
+                b.clicks.toLocaleString("ja-JP"),
+                pct(b.ctr),
+                b.cvs.toLocaleString("ja-JP"),
+                pct(b.cvr),
+                yen(b.revenue),
               ])}
               empty="データがありません"
             />
@@ -279,24 +273,22 @@ export function ReportsPanel() {
             />
           </Section>
 
-          <Section title="詳細データ（アイテム × ページ × クリエイティブ）">
+          <Section title="詳細データ（ブランド × ページ × クリエイティブ）">
             <p style={{ color: "#666", fontSize: 13 }}>
-              CVごとに、購入商品・接触した表示位置（ページグループ）・クリエイティブの組み合わせで集計します。
-              ページグループは接触時点のもののみ記録されるため、この機能の追加前に発生したCVは「（ページ不明）」に入ります。
-              imp/クリックは商品と紐付かないため、ページグループ・クリエイティブ単位の行として別途表示します
-              （商品名列は「－（imp/クリックのみ、商品と紐付きません）」）。
+              ブランド・接触した表示位置（ページグループ）・クリエイティブの組み合わせでimp/click/CVをまとめて集計します。
+              ページグループは接触時点のもののみ記録されるため、この機能の追加前に発生したイベントは「（ページ不明）」に入ります。
             </p>
             <Table
-              head={["商品コード", "商品名", "ページグループ", "クリエイティブ", "imp", "click", "CV（クリックスルー）", "CV（ビュースルー）", "売上"]}
+              head={["ブランド", "ページグループ", "クリエイティブ", "imp", "click", "CTR", "CV", "CVR", "売上"]}
               rows={data.details.map((d) => [
-                d.productCode ?? "—",
-                d.productName,
+                d.brandName,
                 d.pageGroupName,
                 d.creativeName,
                 d.imps.toLocaleString("ja-JP"),
                 d.clicks.toLocaleString("ja-JP"),
-                d.cvClick.toLocaleString("ja-JP"),
-                d.cvView.toLocaleString("ja-JP"),
+                pct(d.ctr),
+                d.cvs.toLocaleString("ja-JP"),
+                pct(d.cvr),
                 yen(d.revenue),
               ])}
               empty="データがありません"

@@ -25,6 +25,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <strong style={{ fontSize: 16 }}>ポップアップツール管理画面</strong>
           <nav style={{ display: "flex", gap: 16 }}>
             <a href="/campaigns">キャンペーン</a>
+            <a href="/brands">ブランド管理</a>
             <a href="/reports">実績レポート</a>
             <a href="/tags">タグ管理</a>
             <a href="/order-api">受注API連携</a>

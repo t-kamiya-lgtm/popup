@@ -1,7 +1,7 @@
 "use client";
 
 import type { CreativeConfig, Device, PositionPc } from "@popup/shared";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CampaignDetail } from "@/lib/campaigns";
 import { normalizeUrlPattern } from "@/lib/url-pattern";
 import { normalizeLinkUrl } from "@/lib/link-url";
@@ -25,6 +25,8 @@ type Creative = CampaignDetail["creatives"][number];
 export function CampaignForm({ initial }: { initial: CampaignDetail }) {
   const [name, setName] = useState(initial.name);
   const [status, setStatus] = useState(initial.status);
+  const [brandId, setBrandId] = useState<number | null>(initial.brandId);
+  const [brands, setBrands] = useState<{ id: number; name: string }[]>([]);
   const [priority, setPriority] = useState(initial.priority);
   const [holdoutRate, setHoldoutRate] = useState(initial.holdoutRate);
   const [devices, setDevices] = useState<string[]>(initial.devices);
@@ -51,6 +53,12 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
 
   const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/brands")
+      .then((res) => (res.ok ? res.json() : { brands: [] }))
+      .then((body) => setBrands(body.brands ?? []));
+  }, []);
 
   async function handleImageUpload(i: number, file: File) {
     setUploadingIndex(i);
@@ -100,6 +108,7 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
         body: JSON.stringify({
           name,
           status,
+          brandId,
           priority,
           holdoutRate,
           devices,
@@ -160,6 +169,23 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
               <option value="paused">停止</option>
               <option value="archived">アーカイブ</option>
             </select>
+          </Field>
+          <Field label="ブランド">
+            <select
+              value={brandId ?? ""}
+              onChange={(e) => setBrandId(e.target.value ? Number(e.target.value) : null)}
+              style={inputStyle}
+            >
+              <option value="">未設定</option>
+              {brands.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            <span style={{ marginLeft: 8, fontSize: 13, color: "#888" }}>
+              <a href="/brands">ブランド管理</a>で追加できます
+            </span>
           </Field>
           <Field label="優先度（数値が小さいほど優先）">
             <input

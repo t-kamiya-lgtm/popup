@@ -27,6 +27,7 @@ interface CreativeInput {
 interface CampaignPayload {
   name: string;
   status: "draft" | "active" | "paused" | "archived";
+  brandId: number | null;
   priority: number;
   holdoutRate: number;
   devices: string[];
@@ -88,7 +89,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       `UPDATE campaigns SET
          name = $2, status = $3, priority = $4, holdout_rate = $5, devices = $6,
          triggers = $7, frequency = $8, position_pc = $9, position_sp = $10,
-         overlay = $11, close_button = $12, updated_at = now()
+         overlay = $11, close_button = $12, brand_id = $13, updated_at = now()
        WHERE id = $1`,
       [
         campaignId,
@@ -103,6 +104,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         body.positionSp,
         body.overlay,
         body.closeButton,
+        body.brandId ?? null,
       ]
     );
     if (rowCount === 0) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -149,6 +151,37 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       await client.query(`DELETE FROM creatives WHERE campaign_id = $1 AND id = ANY($2::bigint[])`, [campaignId, toDelete]);
     }
 
+    return NextResponse.json({ ok: true });
+  });
+}
+
+/**
+ * DELETE /api/v1/campaigns/[id] — refuses to delete a campaign with any
+ * delivery history (an event row against it — imp/click/cv/close/holdout),
+ * so historical reporting can never be silently orphaned by deleting the
+ * campaign it belongs to. A campaign nobody has ever seen (draft, or
+ * active but not yet matched by a visitor) deletes freely; campaign_targets
+ * and creatives cascade via their FKs.
+ */
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const accountId = await requireAccountId();
+  if (accountId instanceof NextResponse) return accountId;
+  const { id } = await params;
+  const campaignId = Number(id);
+  if (!Number.isInteger(campaignId)) return NextResponse.json({ error: "invalid id" }, { status: 400 });
+
+  return withAccount(accountId, async (client) => {
+    const { rows: campaignRows } = await client.query(`SELECT id FROM campaigns WHERE id = $1`, [campaignId]);
+    if (!campaignRows[0]) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    const { rows: usageRows } = await client.query(`SELECT 1 FROM events WHERE campaign_id = $1 LIMIT 1`, [
+      campaignId,
+    ]);
+    if (usageRows.length > 0) {
+      return NextResponse.json({ error: "配信実績があるキャンペーンは削除できません" }, { status: 409 });
+    }
+
+    await client.query(`DELETE FROM campaigns WHERE id = $1`, [campaignId]);
     return NextResponse.json({ ok: true });
   });
 }
