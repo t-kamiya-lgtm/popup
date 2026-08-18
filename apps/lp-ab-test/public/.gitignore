@@ -1,0 +1,5 @@
+# tag.js and cv-tag.js are build output from tag-src/ (see
+# scripts/build-lp-ab-tag.mjs), generated as part of `pnpm build`. Don't
+# commit them.
+tag.js
+cv-tag.js

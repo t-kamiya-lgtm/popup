@@ -8,10 +8,12 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm --filter @popup/web dev",
+    "dev:lp-ab-test": "pnpm --filter @lp-ab-test/web dev",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "db:migrate": "node db/migrate.mjs",
+    "db:migrate:lp-ab-test": "node db/lp-ab-test/migrate.mjs",
     "build:client": "pnpm --filter @popup/loader build && pnpm --filter @popup/sdk build && node scripts/copy-client-dist.mjs"
   },
   "dependencies": {
