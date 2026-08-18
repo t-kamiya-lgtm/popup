@@ -13,7 +13,9 @@ export async function GET(request: NextRequest) {
   const lpName = searchParams.get("lpName") ?? undefined;
   const lpIdsParam = searchParams.get("lpIds");
   const lpIds = lpIdsParam ? lpIdsParam.split(",").map(Number).filter(Number.isFinite) : undefined;
+  const creativeIdsParam = searchParams.get("creativeIds");
+  const creativeIds = creativeIdsParam ? creativeIdsParam.split(",").map(Number).filter(Number.isFinite) : undefined;
 
-  const report = await getReport({ from, to, itemName, lpName, lpIds });
+  const report = await getReport({ from, to, itemName, lpName, lpIds, creativeIds });
   return NextResponse.json({ from, to, report });
 }

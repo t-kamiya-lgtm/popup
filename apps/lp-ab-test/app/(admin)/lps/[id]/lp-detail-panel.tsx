@@ -125,6 +125,9 @@ export function LpDetailPanel({ lpId, canEdit }: { lpId: number; canEdit: boolea
             <TagBox
               text={`<script async src="${appBaseUrl}/cv-tag.js" data-lp-id="${lp.id}" data-order-id="{注文番号}" data-revenue="{注文金額合計(税別)}"></script>`}
             />
+            <div style={{ marginTop: 12 }}>
+              <TagCheckPanel lpId={lp.id} />
+            </div>
           </div>
         )}
       </div>
@@ -205,6 +208,52 @@ function TagBox({ text }: { text: string }) {
   );
 }
 
+interface TagCheckResult {
+  fetchOk: boolean;
+  fetchError: string | null;
+  tagFound: boolean;
+  lpIdMatches: boolean;
+  impressionsLast24h: number;
+}
+
+function TagCheckPanel({ lpId }: { lpId: number }) {
+  const [result, setResult] = useState<TagCheckResult | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  async function runCheck() {
+    setChecking(true);
+    try {
+      const res = await fetch(`/api/v1/lps/${lpId}/tag-check`);
+      if (res.ok) setResult(await res.json());
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div>
+      <button type="button" onClick={runCheck} disabled={checking}>
+        {checking ? "確認中..." : "タグ設置状況を確認"}
+      </button>
+      {result && (
+        <ul style={{ fontSize: 12, marginTop: 8, paddingLeft: 16 }}>
+          <li style={{ color: result.fetchOk ? "#2a7" : "crimson" }}>
+            LPページの取得: {result.fetchOk ? "成功" : `失敗（${result.fetchError}）`}
+          </li>
+          <li style={{ color: result.lpIdMatches ? "#2a7" : result.tagFound ? "#b8860b" : "crimson" }}>
+            差し替えタグの設置:{" "}
+            {result.lpIdMatches ? "設置済み" : result.tagFound ? "タグはあるがLP IDが一致しません" : "見つかりません"}
+          </li>
+          <li style={{ color: result.impressionsLast24h > 0 ? "#2a7" : "#b8860b" }}>
+            過去24時間のimp受信: {result.impressionsLast24h}件
+            {result.impressionsLast24h === 0 && "（タグはあっても計測が届いていない可能性があります）"}
+          </li>
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function SlotPanel({
   slot,
   canEdit,
@@ -266,7 +315,9 @@ function SlotPanel({
         <code style={{ fontSize: 12 }}>{slot.originalImageUrl}</code>
       </h2>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+      <OptimizationSettings slotId={slot.id} mode={slot.optimizationMode} canEdit={canEdit} onChange={onChange} onError={onError} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginTop: 12 }}>
         {slot.creatives.map((c) => (
           <div key={c.id} style={{ border: "1px solid #eee", borderRadius: 6, padding: 8, opacity: c.status === "paused" ? 0.5 : 1 }}>
             {c.imageUrl && (
@@ -299,6 +350,106 @@ function SlotPanel({
             {uploading ? "登録中..." : "パターンを追加"}
           </button>
         </form>
+      )}
+    </div>
+  );
+}
+
+function OptimizationSettings({
+  slotId,
+  mode,
+  canEdit,
+  onChange,
+  onError,
+}: {
+  slotId: number;
+  mode: "equal" | "auto";
+  canEdit: boolean;
+  onChange: () => Promise<void>;
+  onError: (msg: string | null) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [settings, setSettings] = useState<{
+    minImpressions: number;
+    minConversions: number;
+    floorMode: "equal_share" | "fixed_percent";
+    floorPercent: number | null;
+    lastRunAt: string | null;
+  } | null>(null);
+
+  async function load() {
+    const res = await fetch(`/api/v1/slots/${slotId}`);
+    if (res.ok) setSettings(await res.json());
+  }
+
+  useEffect(() => {
+    if (expanded) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  async function patch(body: Record<string, unknown>) {
+    const res = await fetch(`/api/v1/slots/${slotId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      onError(errBody.error ?? "更新に失敗しました");
+      return;
+    }
+    await load();
+    await onChange();
+  }
+
+  return (
+    <div style={{ fontSize: 13 }}>
+      <button type="button" onClick={() => setExpanded((v) => !v)} style={{ fontSize: 12 }}>
+        {expanded ? "▲" : "▼"} 表示率の配分方式: {mode === "auto" ? "自動最適化（CVRベース・日次）" : "均等割り"}
+      </button>
+      {expanded && (
+        <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, marginTop: 4 }}>
+          {canEdit && (
+            <label>
+              <input
+                type="checkbox"
+                checked={mode === "auto"}
+                onChange={(e) => patch({ optimizationMode: e.target.checked ? "auto" : "equal" })}
+              />{" "}
+              自動最適化を有効にする（配信停止フラグは常に優先。手動で表示率を変更したパターンは次回以降の自動最適化から除外されます）
+            </label>
+          )}
+          {mode === "auto" && settings && (
+            <div style={{ marginTop: 8, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+              <label>
+                最低imp数:{" "}
+                <input
+                  type="number"
+                  disabled={!canEdit}
+                  defaultValue={settings.minImpressions}
+                  onBlur={(e) => patch({ minImpressions: Number(e.target.value) })}
+                  style={{ width: 80 }}
+                />
+              </label>
+              <label>
+                最低CV数:{" "}
+                <input
+                  type="number"
+                  disabled={!canEdit}
+                  defaultValue={settings.minConversions}
+                  onBlur={(e) => patch({ minConversions: Number(e.target.value) })}
+                  style={{ width: 80 }}
+                />
+              </label>
+              <span style={{ color: "#666" }}>
+                下限フロア: {settings.floorMode === "equal_share" ? "均等割り相当" : `${settings.floorPercent ?? "-"}%`}
+              </span>
+              <span style={{ color: "#666" }}>
+                最終実行: {settings.lastRunAt ? new Date(settings.lastRunAt).toLocaleString("ja-JP") : "未実行"}
+              </span>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

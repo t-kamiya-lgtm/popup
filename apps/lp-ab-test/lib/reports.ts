@@ -9,6 +9,8 @@ export interface ReportFilters {
   lpIds?: number[];
   itemName?: string;
   lpName?: string;
+  /** Restrict displayed creatives to this set (calendar band drill-down — docs/lp-ab-test/00-requirements.md 6). */
+  creativeIds?: number[];
 }
 
 export interface SlotStat {
@@ -89,10 +91,13 @@ export async function getReport(filters: ReportFilters): Promise<LpReport[]> {
     const slotKeys = [...new Set(slotsForLp.map((r) => r.slot_key as string))] as Array<"a" | "b">;
     const slots: SlotStat[] = slotKeys.map((slotKey) => {
       const rowsForSlot = slotsForLp.filter((r) => r.slot_key === slotKey);
+      const visibleRows = filters.creativeIds
+        ? rowsForSlot.filter((r) => filters.creativeIds!.includes(Number(r.creative_id)))
+        : rowsForSlot;
       return {
         slotKey,
         label: rowsForSlot[0]?.label ?? "",
-        creatives: rowsForSlot.map((r) => {
+        creatives: visibleRows.map((r) => {
           const creativeId = Number(r.creative_id);
           const impCount = imps.get(creativeId) ?? 0;
           const cvCount = cvCounts.get(creativeId) ?? 0;

@@ -18,8 +18,10 @@ export async function GET(request: NextRequest) {
   const lpName = searchParams.get("lpName") ?? undefined;
   const lpIdsParam = searchParams.get("lpIds");
   const lpIds = lpIdsParam ? lpIdsParam.split(",").map(Number).filter(Number.isFinite) : undefined;
+  const creativeIdsParam = searchParams.get("creativeIds");
+  const creativeIds = creativeIdsParam ? creativeIdsParam.split(",").map(Number).filter(Number.isFinite) : undefined;
 
-  const report = await getReport({ from, to, itemName, lpName, lpIds });
+  const report = await getReport({ from, to, itemName, lpName, lpIds, creativeIds });
 
   const header = ["品番", "アイテム名", "LP名", "スロット", "クリエイティブ", "元画像", "imp", "CV", "CVR(%)", "売上"];
   const lines = [header.map(csvEscape).join(",")];
