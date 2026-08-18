@@ -1,14 +1,13 @@
-import type { TriggerRule, TriggerType, Triggers } from "@popup/shared";
+import { matchUrl, type TriggerRule, type TriggerType, type Triggers } from "@popup/shared";
 
 export type Cleanup = () => void;
 
 /**
  * Wires up the trigger rules from a campaign's config and calls `onFire`
  * exactly once, with whichever rule satisfied `mode` ("any" = OR, "all" =
- * AND). Phase 1 only implements exit_back and dwell (docs/08-roadmap.md
- * Phase 1 scope) — exit_intent/scroll/idle/exit_tab rule types are parsed
- * but currently no-ops, so a campaign config that includes them degrades
- * gracefully instead of breaking.
+ * AND). Implements exit_back, dwell, and image_click — exit_intent/scroll/
+ * idle/exit_tab rule types are parsed but currently no-ops, so a campaign
+ * config that includes them degrades gracefully instead of breaking.
  */
 export function registerTriggers(triggers: Triggers, sessionStartedAt: number, onFire: (type: TriggerType) => void): Cleanup {
   const fired = new Set<TriggerType>();
@@ -45,9 +44,52 @@ function registerRule(rule: TriggerRule, sessionStartedAt: number, fire: () => v
       return registerExitBack(fire);
     case "dwell":
       return registerDwell(rule.seconds ?? 60, sessionStartedAt, fire);
+    case "image_click":
+      return registerImageClick(rule.imagePattern, rule.imageMatchType ?? "contains", fire);
     default:
       return null;
   }
+}
+
+/**
+ * Fires when the visitor clicks an <img> whose `src` matches the admin's
+ * pattern — an alternative to a CSS-selector-based "click this element"
+ * trigger that doesn't require anyone to inspect the page's HTML: the
+ * pattern is just the image URL, copyable via "画像アドレスをコピー" in any
+ * browser. Matched the same way a target-page URL rule matches a path
+ * (packages/shared/src/url-match.ts's matchUrl), so query strings/cache
+ * busters on the actual rendered `src` don't break a "部分一致" pattern.
+ *
+ * A single delegated listener (not one per matching <img>, which can't
+ * exist yet for images the page hasn't finished loading) walks up from
+ * the click target to find the nearest <img> — either the target itself,
+ * or one nested inside a clicked wrapper like `<a><img></a>`.
+ */
+function registerImageClick(pattern: string | undefined, matchType: TriggerRule["imageMatchType"], fire: () => void): Cleanup | null {
+  if (!pattern) return null;
+  const imagePattern = pattern;
+
+  function onClick(e: MouseEvent) {
+    // Whole handler guarded, not just the match — a malformed pattern (bad
+    // regex) or an unexpected event.target shape must never break the
+    // host page. See docs/02-architecture.md 8.
+    try {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const img = findClickedImage(target);
+      if (img?.src && matchUrl({ match: matchType ?? "contains", pattern: imagePattern }, img.src)) fire();
+    } catch {
+      // never fires; the click just falls through as a normal page click
+    }
+  }
+
+  document.addEventListener("click", onClick, true);
+  return () => document.removeEventListener("click", onClick, true);
+}
+
+function findClickedImage(target: Element): HTMLImageElement | null {
+  if (target instanceof HTMLImageElement) return target;
+  return target.querySelector("img");
 }
 
 /**

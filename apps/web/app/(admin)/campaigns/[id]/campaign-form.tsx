@@ -35,6 +35,10 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
   const [dwellSeconds, setDwellSeconds] = useState(
     initial.triggers.rules.find((r) => r.type === "dwell")?.seconds ?? 60
   );
+  const [imageClick, setImageClick] = useState(initial.triggers.rules.some((r) => r.type === "image_click"));
+  const imageClickRule = initial.triggers.rules.find((r) => r.type === "image_click");
+  const [imagePattern, setImagePattern] = useState(imageClickRule?.imagePattern ?? "");
+  const [imageMatchType, setImageMatchType] = useState(imageClickRule?.imageMatchType ?? "contains");
   const [triggerMode, setTriggerMode] = useState(initial.triggers.mode);
   const [frequency, setFrequency] = useState(initial.frequency);
   const [positionPc, setPositionPc] = useState<PositionPc>(initial.positionPc as PositionPc);
@@ -91,6 +95,9 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
       const rules = [];
       if (exitBack) rules.push({ type: "exit_back" });
       if (dwell) rules.push({ type: "dwell", seconds: dwellSeconds });
+      if (imageClick && imagePattern.trim() !== "") {
+        rules.push({ type: "image_click", imagePattern: imagePattern.trim(), imageMatchType });
+      }
 
       const normalizedTargets = targets
         .filter((t) => t.pattern.trim() !== "")
@@ -275,6 +282,30 @@ export function CampaignForm({ initial }: { initial: CampaignDetail }) {
               />
               秒経過
             </label>
+            <label style={checkboxLabel}>
+              <input type="checkbox" checked={imageClick} onChange={(e) => setImageClick(e.target.checked)} />
+              特定の画像（バナー）をクリック
+            </label>
+            {imageClick && (
+              <div style={{ display: "flex", gap: 8, marginLeft: 24, marginBottom: 8 }}>
+                <select
+                  value={imageMatchType}
+                  onChange={(e) => setImageMatchType(e.target.value)}
+                  style={{ ...inputStyle, width: 100 }}
+                >
+                  <option value="exact">完全一致</option>
+                  <option value="prefix">前方一致</option>
+                  <option value="contains">部分一致</option>
+                  <option value="regex">正規表現</option>
+                </select>
+                <input
+                  value={imagePattern}
+                  onChange={(e) => setImagePattern(e.target.value)}
+                  placeholder="画像のURL（一部でも可。ブラウザで画像を右クリック→「画像アドレスをコピー」）"
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+              </div>
+            )}
             <label style={checkboxLabel}>
               <input
                 type="radio"

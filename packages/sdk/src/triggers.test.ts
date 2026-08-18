@@ -94,6 +94,77 @@ describe("registerTriggers: exit_back", () => {
   });
 });
 
+describe("registerTriggers: image_click", () => {
+  it("fires when a matching <img> is clicked directly", () => {
+    const triggers: Triggers = {
+      mode: "any",
+      rules: [{ type: "image_click", imagePattern: "banner.jpg", imageMatchType: "contains" }],
+    };
+    const onFire = vi.fn();
+    registerTriggers(triggers, Date.now(), onFire);
+
+    const img = document.createElement("img");
+    img.src = "https://cdn.example.com/lp/banner.jpg?v=2";
+    document.body.appendChild(img);
+    img.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onFire).toHaveBeenCalledWith("image_click");
+    document.body.removeChild(img);
+  });
+
+  it("fires when the click lands on a wrapper around the matching <img>", () => {
+    const triggers: Triggers = {
+      mode: "any",
+      rules: [{ type: "image_click", imagePattern: "banner.jpg", imageMatchType: "contains" }],
+    };
+    const onFire = vi.fn();
+    registerTriggers(triggers, Date.now(), onFire);
+
+    const link = document.createElement("a");
+    const img = document.createElement("img");
+    img.src = "https://cdn.example.com/lp/banner.jpg";
+    link.appendChild(img);
+    document.body.appendChild(link);
+    link.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onFire).toHaveBeenCalledWith("image_click");
+    document.body.removeChild(link);
+  });
+
+  it("does not fire for a click on a non-matching image", () => {
+    const triggers: Triggers = {
+      mode: "any",
+      rules: [{ type: "image_click", imagePattern: "banner.jpg", imageMatchType: "contains" }],
+    };
+    const onFire = vi.fn();
+    registerTriggers(triggers, Date.now(), onFire);
+
+    const img = document.createElement("img");
+    img.src = "https://cdn.example.com/lp/other.jpg";
+    document.body.appendChild(img);
+    img.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onFire).not.toHaveBeenCalled();
+    document.body.removeChild(img);
+  });
+
+  it("does not fire for a click that never touches an image", () => {
+    const triggers: Triggers = {
+      mode: "any",
+      rules: [{ type: "image_click", imagePattern: "banner.jpg", imageMatchType: "contains" }],
+    };
+    const onFire = vi.fn();
+    registerTriggers(triggers, Date.now(), onFire);
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    div.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onFire).not.toHaveBeenCalled();
+    document.body.removeChild(div);
+  });
+});
+
 describe("registerTriggers: mode", () => {
   it("mode 'all' waits for every rule to fire before calling onFire", () => {
     const triggers: Triggers = {

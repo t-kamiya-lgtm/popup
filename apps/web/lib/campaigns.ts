@@ -12,7 +12,10 @@ export interface CampaignDetail {
   priority: number;
   holdoutRate: number;
   devices: string[];
-  triggers: { mode: "any" | "all"; rules: { type: string; seconds?: number }[] };
+  triggers: {
+    mode: "any" | "all";
+    rules: { type: string; seconds?: number; imagePattern?: string; imageMatchType?: string }[];
+  };
   frequency: {
     perSession: number;
     perDay: number;

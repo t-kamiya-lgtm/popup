@@ -28,13 +28,17 @@ export type TriggerType =
   | "dwell"
   | "scroll"
   | "idle"
-  | "exit_tab";
+  | "exit_tab"
+  | "image_click";
 
 export interface TriggerRule {
   type: TriggerType;
   seconds?: number;
   percent?: number;
   sensitivity?: number;
+  /** image_click only: matched against a clicked <img>'s `src` the same way UrlRule matches a page path (packages/shared/src/url-match.ts's matchUrl). */
+  imagePattern?: string;
+  imageMatchType?: MatchType;
 }
 
 export interface Triggers {
