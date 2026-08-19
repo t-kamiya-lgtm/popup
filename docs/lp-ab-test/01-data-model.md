@@ -172,32 +172,34 @@ CREATE TABLE slot_optimization_settings (
 
 ```sql
 CREATE TABLE impressions (
-  id              BIGSERIAL,
+  id              BIGSERIAL PRIMARY KEY,
   occurred_at     TIMESTAMPTZ NOT NULL,
   lp_id           BIGINT NOT NULL REFERENCES lps(id),
   session_id      TEXT NOT NULL,             -- 1st-party ID（ブラウザ側で発行）
   creative_a_id   BIGINT REFERENCES creatives(id),  -- スロットAが無いLPはNULL
   creative_b_id   BIGINT REFERENCES creatives(id),  -- スロットBが無いLPはNULL
-  device          TEXT CHECK (device IN ('pc','sp','tablet')),
-  PRIMARY KEY (id, occurred_at)
-) PARTITION BY RANGE (occurred_at);
+  device          TEXT CHECK (device IN ('pc','sp','tablet'))
+);
 
 CREATE TABLE conversions (
-  id              BIGSERIAL,
+  id              BIGSERIAL PRIMARY KEY,
   occurred_at     TIMESTAMPTZ NOT NULL,
   lp_id           BIGINT NOT NULL REFERENCES lps(id),
   session_id      TEXT NOT NULL,             -- imp発生時のsession_idと突き合わせて配分を特定
   order_id        TEXT,
   revenue         NUMERIC(12,2),
   creative_a_id   BIGINT REFERENCES creatives(id),  -- session突合時点のスナップショット
-  creative_b_id   BIGINT REFERENCES creatives(id),
-  PRIMARY KEY (id, occurred_at)
-) PARTITION BY RANGE (occurred_at);
+  creative_b_id   BIGINT REFERENCES creatives(id)
+);
 
 CREATE UNIQUE INDEX ON conversions (lp_id, order_id) WHERE order_id IS NOT NULL;
 CREATE INDEX ON impressions (lp_id, occurred_at DESC);
 CREATE INDEX ON conversions (lp_id, occurred_at DESC);
 ```
+
+（当初は月次range partitioningを想定していたが、Postgresはパーティション化テーブルの
+UNIQUE制約にパーティションキーを含めることを要求するため、`(lp_id, order_id)`だけの
+重複防止キーと両立できないと判明し撤回。このツールの規模では素の1テーブルで十分）
 
 - CVはカート側のサンクスページに設置する**独立したCVタグ**から送信される
   （popup toolのCVタグとは別物。7章参照）。`session_id` はLP訪問時にブラウザに
