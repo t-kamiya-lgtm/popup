@@ -49,6 +49,11 @@ export default function LoginPage({
           </p>
         )}
         {clientError && <p style={{ color: "crimson", fontSize: 13, marginBottom: 16 }}>{clientError}</p>}
+        {/* TEMPORARY diagnostic — remove once the env var issue is confirmed fixed */}
+        <p style={{ fontSize: 11, color: "#999", marginBottom: 16 }}>
+          debug: URL=[{process.env.NEXT_PUBLIC_SUPABASE_URL ?? "MISSING"}] ANON=[
+          {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY.slice(0, 12) + "..." : "MISSING"}]
+        </p>
         <button onClick={handleLogin} disabled={loading} style={{ padding: "10px 20px" }}>
           {loading ? "リダイレクト中..." : "Googleでログイン"}
         </button>
