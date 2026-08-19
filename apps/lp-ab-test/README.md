@@ -1,7 +1,8 @@
 # LP Creative A/B Test Tool
 
 Separate app from `apps/web` (the popup tool) — its own Supabase project/DB,
-its own Vercel deployment. Design docs: [`docs/lp-ab-test/`](../../docs/lp-ab-test).
+its own Vercel deployment (Project Settings: Root Directory `apps/lp-ab-test`).
+Design docs: [`docs/lp-ab-test/`](../../docs/lp-ab-test).
 
 ## Implementation status
 
