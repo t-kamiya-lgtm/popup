@@ -3,13 +3,21 @@ import { pool } from "@/lib/db";
 
 // Public, unauthenticated config JSON for the delivery tag (tag-src/tag.ts).
 // No session/cookie involved — this is fetched cross-origin from the LP's
-// own domain (docs/lp-ab-test/02-architecture.md 2).
+// own domain (docs/lp-ab-test/02-architecture.md 2), so it needs CORS
+// headers (same as this app's own /e and the popup tool's /c, /e) or the
+// browser blocks the response before the tag can read it.
+const CORS_HEADERS = { "Access-Control-Allow-Origin": "*" };
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function GET(request: NextRequest, { params }: { params: { lpId: string } }) {
   const lpId = Number(params.lpId);
-  if (!Number.isFinite(lpId)) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!Number.isFinite(lpId)) return NextResponse.json({ error: "not found" }, { status: 404, headers: CORS_HEADERS });
 
   const { rows: lpRows } = await pool().query(`SELECT id, delivery_status FROM lps WHERE id = $1`, [lpId]);
-  if (lpRows.length === 0) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (lpRows.length === 0) return NextResponse.json({ error: "not found" }, { status: 404, headers: CORS_HEADERS });
 
   const { rows: slotRows } = await pool().query(
     `SELECT id, slot_key, original_image_url FROM lp_slots WHERE lp_id = $1 ORDER BY slot_key ASC`,
@@ -41,6 +49,6 @@ export async function GET(request: NextRequest, { params }: { params: { lpId: st
           })),
       })),
     },
-    { headers: { "Cache-Control": "public, max-age=30" } }
+    { headers: { "Cache-Control": "public, max-age=30", ...CORS_HEADERS } }
   );
 }
