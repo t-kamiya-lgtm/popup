@@ -120,8 +120,15 @@ export function LpDetailPanel({ lpId, canEdit }: { lpId: number; canEdit: boolea
         {showTags && (
           <div style={{ border: "1px solid #ddd", borderRadius: 6, padding: 12, marginTop: 8, fontSize: 13 }}>
             <p>LPに設置する差し替えタグ（1本）:</p>
+            <p style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
+              設置場所: LPページの <code>&lt;head&gt;</code> 直後（画像がブラウザに描画される前に実行させるため、
+              なるべく早い位置に置いてください）
+            </p>
             <TagBox text={`<script async src="${appBaseUrl}/tag.js" data-lp-id="${lp.id}"></script>`} />
             <p style={{ marginTop: 12 }}>サンクスページに設置するCVタグ:</p>
+            <p style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
+              設置場所: サンクスページ（購入完了ページ）の <code>&lt;/body&gt;</code> 直前
+            </p>
             <TagBox
               text={`<script async src="${appBaseUrl}/cv-tag.js" data-lp-id="${lp.id}" data-order-id="{注文番号}" data-revenue="{注文金額合計(税別)}"></script>`}
             />
