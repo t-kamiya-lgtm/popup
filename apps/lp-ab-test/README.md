@@ -2,7 +2,8 @@
 
 Separate app from `apps/web` (the popup tool) — its own Supabase project/DB,
 its own Vercel deployment (Project Settings: Root Directory `apps/lp-ab-test`).
-Design docs: [`docs/lp-ab-test/`](../../docs/lp-ab-test).
+Design docs: [`docs/lp-ab-test/`](../../docs/lp-ab-test). Stable preview URL:
+`https://lp-ab-test-git-claude-lp-creativ-68c892-t-kamiya-lgtms-projects.vercel.app`.
 
 ## Implementation status
 
