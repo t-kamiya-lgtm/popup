@@ -55,6 +55,8 @@ export interface ReportFilters {
   brandId?: number;
   pagePattern?: string;
   creativeId?: number;
+  /** Restricts to one campaign — used when arriving from the LP creative A/B test tool's per-LP report link (docs/lp-ab-test/03-popup-integration.md). Not exposed as its own dropdown; campaigns aren't otherwise a browsing axis in this screen. */
+  campaignId?: number;
 }
 
 export interface ReportData {
@@ -198,6 +200,10 @@ export async function getReportData(
     extraParams.push(filters.brandId);
     extraSql += ` AND camp.brand_id = $${3 + extraParams.length}`;
   }
+  if (filters.campaignId != null) {
+    extraParams.push(filters.campaignId);
+    extraSql += ` AND e.campaign_id = $${3 + extraParams.length}`;
+  }
 
   const summaryRows = (
     await client.query(
@@ -286,6 +292,10 @@ export async function getReportData(
   if (filters.creativeId != null) {
     creativeParams.push(filters.creativeId);
     creativeWhereSql += ` AND c.id = $${creativeParams.length}`;
+  }
+  if (filters.campaignId != null) {
+    creativeParams.push(filters.campaignId);
+    creativeWhereSql += ` AND camp.id = $${creativeParams.length}`;
   }
   const { rows: creativeRows } = await client.query(
     `${EVENTS_CTE}

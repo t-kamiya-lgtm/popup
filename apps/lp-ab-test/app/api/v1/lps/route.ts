@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { pool } from "@/lib/db";
 import { requireEditor, requireMember } from "@/lib/require-member";
+import { getPopupLink } from "@/lib/popup-link";
 
 export async function GET(request: NextRequest) {
   const member = await requireMember();
@@ -34,18 +35,21 @@ export async function GET(request: NextRequest) {
     params
   );
 
-  const lps = rows.map((r) => ({
-    id: Number(r.id),
-    productCode: r.product_code as string,
-    itemName: r.item_name as string,
-    lpName: r.lp_name as string,
-    url: r.url as string,
-    topImageUrl: r.top_image_url as string | null,
-    deliveryStatus: r.delivery_status as "active" | "paused",
-    slotCount: Number(r.slot_count),
-    activeCreativeCount: Number(r.active_creative_count),
-    hasPausedCreative: Boolean(r.has_paused_creative),
-  }));
+  const lps = await Promise.all(
+    rows.map(async (r) => ({
+      id: Number(r.id),
+      productCode: r.product_code as string,
+      itemName: r.item_name as string,
+      lpName: r.lp_name as string,
+      url: r.url as string,
+      topImageUrl: r.top_image_url as string | null,
+      deliveryStatus: r.delivery_status as "active" | "paused",
+      slotCount: Number(r.slot_count),
+      activeCreativeCount: Number(r.active_creative_count),
+      hasPausedCreative: Boolean(r.has_paused_creative),
+      popupLink: await getPopupLink(Number(r.id), r.url as string),
+    }))
+  );
 
   return NextResponse.json({ lps });
 }

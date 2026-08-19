@@ -8,12 +8,18 @@ interface SlotStat {
   label: string;
   creatives: CreativeStat[];
 }
+interface PopupLink {
+  type: "campaign" | "campaign_list" | "none";
+  editUrl?: string;
+  reportUrl?: string;
+}
 interface LpReport {
   lpId: number;
   productCode: string;
   itemName: string;
   lpName: string;
   slots: SlotStat[];
+  popupLink: PopupLink;
 }
 
 function todayIso() {
@@ -126,6 +132,17 @@ export function ReportsPanel() {
           <div key={lp.lpId} style={{ marginTop: 24 }}>
             <h2 style={{ fontSize: 16 }}>
               {lp.lpName}{" "}
+              {lp.popupLink.type !== "none" && (
+                <a
+                  href={lp.popupLink.reportUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={lp.popupLink.type === "campaign" ? "ポップアップツールのレポート画面を開く" : "ポップアップツールのキャンペーン一覧を開く（複数該当）"}
+                  style={{ fontSize: 12, textDecoration: "none" }}
+                >
+                  🅿️
+                </a>
+              )}{" "}
               <span style={{ fontSize: 12, color: "#666", fontWeight: "normal" }}>
                 （品番: {lp.productCode} / アイテム名: {lp.itemName}）
               </span>

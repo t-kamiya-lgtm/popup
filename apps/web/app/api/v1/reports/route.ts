@@ -28,6 +28,8 @@ export async function GET(req: NextRequest) {
   if (pagePattern) filters.pagePattern = pagePattern;
   const creativeId = params.get("creativeId");
   if (creativeId) filters.creativeId = Number(creativeId);
+  const campaignId = params.get("campaignId");
+  if (campaignId) filters.campaignId = Number(campaignId);
 
   return withAccount(accountId, async (client) => {
     const site = await getCurrentSite(client);

@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 
+interface PopupLink {
+  type: "campaign" | "campaign_list" | "none";
+  editUrl?: string;
+  reportUrl?: string;
+}
 interface Lp {
   id: number;
   productCode: string;
@@ -13,6 +18,7 @@ interface Lp {
   slotCount: number;
   activeCreativeCount: number;
   hasPausedCreative: boolean;
+  popupLink: PopupLink;
 }
 
 interface CreativeDetail {
@@ -200,6 +206,17 @@ export function LpsPanel({ canEdit }: { canEdit: boolean }) {
                   <td style={{ padding: 8 }}>{lp.itemName}</td>
                   <td style={{ padding: 8 }}>
                     <a href={`/lps/${lp.id}`}>{lp.lpName}</a>
+                    {lp.popupLink.type !== "none" && (
+                      <a
+                        href={lp.popupLink.editUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={lp.popupLink.type === "campaign" ? "ポップアップツールの編集画面を開く" : "ポップアップツールのキャンペーン一覧を開く（複数該当）"}
+                        style={{ marginLeft: 6, fontSize: 11, textDecoration: "none" }}
+                      >
+                        🅿️
+                      </a>
+                    )}
                   </td>
                   <td style={{ padding: 8, color: badge.color }}>{badge.label}</td>
                   <td style={{ padding: 8 }}>{lp.activeCreativeCount}</td>

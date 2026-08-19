@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { FilterOptions, ReportData } from "@/lib/reports";
 
 type Preset = "today" | "yesterday" | "7d" | "30d" | "thisMonth" | "lastMonth" | "custom";
@@ -50,6 +51,14 @@ const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
 const yen = (n: number) => `¥${Math.round(n).toLocaleString("ja-JP")}`;
 
 export function ReportsPanel() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Arriving from the LP creative A/B test tool's per-LP report link
+  // (docs/lp-ab-test/03-popup-integration.md) — not one of this screen's own
+  // filter dropdowns, just a one-time restriction read from the URL.
+  const campaignIdParam = searchParams.get("campaignId");
+  const campaignId = campaignIdParam ? Number(campaignIdParam) : null;
+
   const [preset, setPreset] = useState<Preset>("7d");
   const [customFrom, setCustomFrom] = useState(() => toDateInputValue(rangeForPreset("7d").from));
   const [customTo, setCustomTo] = useState(() => toDateInputValue(rangeForPreset("7d").to));
@@ -80,6 +89,7 @@ export function ReportsPanel() {
     if (brandId) params.set("brandId", brandId);
     if (pagePattern) params.set("pagePattern", pagePattern);
     if (creativeId) params.set("creativeId", creativeId);
+    if (campaignId) params.set("campaignId", String(campaignId));
     fetch(`/api/v1/reports?${params}`)
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? "取得に失敗しました");
@@ -88,7 +98,7 @@ export function ReportsPanel() {
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [range, brandId, pagePattern, creativeId]);
+  }, [range, brandId, pagePattern, creativeId, campaignId]);
 
   function handlePresetChange(p: Preset) {
     setPreset(p);
@@ -143,6 +153,14 @@ export function ReportsPanel() {
 
   return (
     <div>
+      {campaignId && (
+        <div style={{ fontSize: 13, background: "#fff8e1", padding: "6px 10px", borderRadius: 4, marginBottom: 12, display: "inline-block" }}>
+          キャンペーンID {campaignId} で絞り込み中
+          <button type="button" onClick={() => router.replace("/reports")} style={{ marginLeft: 8, fontSize: 12 }}>
+            解除
+          </button>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
         {(Object.keys(PRESET_LABEL) as Preset[])
           .filter((p) => p !== "custom")

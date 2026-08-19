@@ -24,6 +24,7 @@ export interface LpReport {
   productCode: string;
   itemName: string;
   lpName: string;
+  url: string;
   slots: SlotStat[];
 }
 
@@ -81,7 +82,7 @@ export async function getReport(filters: ReportFilters): Promise<LpReport[]> {
   const revenue = mergeCounts(cvA.rows, cvB.rows, "revenue");
 
   const { rows: lpRows } = await pool().query(
-    `SELECT id, product_code, item_name, lp_name FROM lps WHERE id = ANY($1::bigint[])`,
+    `SELECT id, product_code, item_name, lp_name, url FROM lps WHERE id = ANY($1::bigint[])`,
     [lpIds]
   );
 
@@ -119,6 +120,7 @@ export async function getReport(filters: ReportFilters): Promise<LpReport[]> {
       productCode: lp.product_code as string,
       itemName: lp.item_name as string,
       lpName: lp.lp_name as string,
+      url: lp.url as string,
       slots,
     };
   });
