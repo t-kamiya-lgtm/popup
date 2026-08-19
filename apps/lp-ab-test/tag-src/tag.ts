@@ -54,8 +54,7 @@ function cssEscape(value: string): string {
   return window.CSS?.escape ? window.CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
 }
 
-async function main() {
-  const script = document.currentScript as HTMLScriptElement | null;
+async function main(script: HTMLScriptElement | null) {
   const lpId = Number(script?.dataset.lpId);
   if (!lpId) return;
 
@@ -90,8 +89,13 @@ async function main() {
   }).catch(() => {});
 }
 
+// Must capture currentScript synchronously, right here at top-level load
+// time — it reverts to null as soon as this script finishes executing, so
+// reading it later (e.g. inside a deferred DOMContentLoaded callback) would
+// always see null and silently no-op.
+const currentScript = document.currentScript as HTMLScriptElement | null;
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", main);
+  document.addEventListener("DOMContentLoaded", () => void main(currentScript));
 } else {
-  void main();
+  void main(currentScript);
 }
