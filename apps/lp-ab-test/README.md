@@ -10,6 +10,10 @@ Source is this branch/Preview — not any row still showing Production /
 `claude/ec-exit-popup-tool-ssh4xs`, which predates this app and always
 fails with a missing Root Directory.)
 
+`NEXT_PUBLIC_APP_BASE_URL` must equal the stable preview URL above — it's
+inlined at build time, so a value change only takes effect on the *next*
+build, never on an already-built deployment.
+
 ## Implementation status
 
 All three phases discussed with the user are implemented (per
