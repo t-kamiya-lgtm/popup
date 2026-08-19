@@ -9,19 +9,29 @@ export default function LoginPage({
   searchParams: { error?: string };
 }) {
   const [loading, setLoading] = useState(false);
+  const [clientError, setClientError] = useState<string | null>(null);
 
   async function handleLogin() {
     setLoading(true);
-    const supabase = createSupabaseBrowserClient();
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        // Re-shows the account picker — this is a shared work admin tool,
-        // not a personal app (same reasoning as the popup tool's login).
-        queryParams: { prompt: "select_account" },
-      },
-    });
+    setClientError(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          // Re-shows the account picker — this is a shared work admin tool,
+          // not a personal app (same reasoning as the popup tool's login).
+          queryParams: { prompt: "select_account" },
+        },
+      });
+      if (error) throw error;
+      // On success the browser is already navigating away to Google —
+      // intentionally leave `loading` true rather than resetting it.
+    } catch (err) {
+      setClientError(err instanceof Error ? err.message : "ログインを開始できませんでした。");
+      setLoading(false);
+    }
   }
 
   const errorMessage: Record<string, string> = {
@@ -38,6 +48,7 @@ export default function LoginPage({
             {errorMessage[searchParams.error] ?? "ログインに失敗しました。"}
           </p>
         )}
+        {clientError && <p style={{ color: "crimson", fontSize: 13, marginBottom: 16 }}>{clientError}</p>}
         <button onClick={handleLogin} disabled={loading} style={{ padding: "10px 20px" }}>
           {loading ? "リダイレクト中..." : "Googleでログイン"}
         </button>
