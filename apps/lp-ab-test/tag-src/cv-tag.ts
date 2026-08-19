@@ -2,21 +2,34 @@
 // own CV tag (docs/lp-ab-test/00-requirements.md 7: tags stay independent so
 // this tool works even where the popup tool isn't installed).
 //
-// <script async src="https://{host}/cv-tag.js"
-//         data-lp-id="123" data-order-id="{注文番号}" data-revenue="{注文金額合計(税別)}">
+// <script>
+//   window.__lpabCv = { lpId: 123, orderId: "{注文番号}", revenue: {注文金額合計(税別)} };
 // </script>
+// <script async src="https://{host}/cv-tag.js"></script>
+//
+// The order id/revenue must come from a global set by an inline <script>,
+// not from this script tag's own attributes: cart platforms (e.g. スマレジ
+// EC・リピート — see apps/web's equivalent tag) only substitute their
+// `{...}` template placeholders inside a page's own inline script text, not
+// inside arbitrary HTML attribute values.
 //
 // Requires the thank-you page to be same-origin as the LP so the session id
 // written to localStorage by tag.js is readable here (docs/lp-ab-test/
 // 02-architecture.md 3).
 const STORAGE_KEY = "lpab_sid";
 
-async function main() {
-  const script = document.currentScript as HTMLScriptElement | null;
-  const lpId = Number(script?.dataset.lpId);
-  const orderId = script?.dataset.orderId;
-  const revenue = script?.dataset.revenue ? Number(script.dataset.revenue) : undefined;
-  // Cart templates substitute `{注文番号}` etc. server-side; if that
+interface CvGlobal {
+  lpId: number;
+  orderId: string;
+  revenue?: number;
+}
+
+async function main(script: HTMLScriptElement | null) {
+  const cv = (window as unknown as { __lpabCv?: CvGlobal }).__lpabCv;
+  const lpId = Number(cv?.lpId);
+  const orderId = cv?.orderId;
+  const revenue = cv?.revenue;
+  // The cart template substitutes `{注文番号}` etc. server-side; if that
   // substitution didn't happen (e.g. tag pasted on a non-order page during
   // testing) the literal placeholder is still in the string — bail out
   // rather than recording a bogus conversion.
@@ -39,4 +52,4 @@ async function main() {
   }).catch(() => {});
 }
 
-void main();
+void main(document.currentScript as HTMLScriptElement | null);
