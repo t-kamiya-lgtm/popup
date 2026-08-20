@@ -4,6 +4,17 @@
  * click event, which fires right before navigation) with a `fetch
  * keepalive` fallback for browsers/contexts where `sendBeacon` is
  * unavailable or rejects the payload (some browsers cap beacon size).
+ *
+ * Both paths deliberately send as `text/plain`, not `application/json`:
+ * a real cross-origin test (a live CV send from primedirect.jp) showed
+ * Chrome CORS-checking the beacon itself when the Blob's declared type is
+ * a non-"simple" content type like application/json — despite the
+ * preflight OPTIONS succeeding, the actual send failed with a CORS error
+ * and the event was silently lost (sendBeacon's return value doesn't
+ * surface it). `text/plain` is one of the fetch spec's "simple" content
+ * types, so it's exempt from that check entirely on both paths. The
+ * server doesn't care either way — `req.json()` parses the body by
+ * content, not by the declared Content-Type header.
  */
 export function sendEvents(collectEndpoint: string, sid: string, v: number, events: unknown[]): void {
   if (events.length === 0) return;
@@ -11,7 +22,7 @@ export function sendEvents(collectEndpoint: string, sid: string, v: number, even
 
   try {
     if ("sendBeacon" in navigator) {
-      const blob = new Blob([body], { type: "application/json" });
+      const blob = new Blob([body], { type: "text/plain" });
       const ok = navigator.sendBeacon(collectEndpoint, blob);
       if (ok) return;
     }
@@ -22,7 +33,7 @@ export function sendEvents(collectEndpoint: string, sid: string, v: number, even
   try {
     fetch(collectEndpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain" },
       body,
       keepalive: true,
     }).catch(() => {

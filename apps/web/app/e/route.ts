@@ -4,11 +4,13 @@ import { servicePool } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-// The `sendBeacon` path (see packages/sdk/collector.ts) needs no CORS
-// headers — it's a no-cors request whose response is never read. But its
-// `fetch keepalive` fallback sends `Content-Type: application/json`, which
-// isn't a "simple" request and triggers a preflight OPTIONS the browser
-// will only honor with these headers present.
+// packages/sdk/src/collector.ts sends both the sendBeacon and fetch
+// keepalive paths as Content-Type: text/plain specifically so neither
+// triggers a CORS preflight (a real cross-origin CV send once showed
+// Chrome CORS-checking sendBeacon itself for a non-"simple" content type
+// like application/json, silently dropping the event). These headers are
+// kept anyway as defense in depth — harmless for a "simple" request, and
+// still required if any caller ever sends a non-simple Content-Type.
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
