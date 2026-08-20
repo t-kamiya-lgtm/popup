@@ -55,6 +55,16 @@ describe("forwardQueryParams", () => {
     const result = forwardQueryParams("https://shop.example.com/products/pm100", "");
     expect(result).toBe("https://shop.example.com/products/pm100");
   });
+
+  it("never forwards pz_preview onto the click-through link", () => {
+    const result = forwardQueryParams(
+      "https://shop.example.com/products/pm100",
+      "https://shop.example.com/lp?pz_preview=2&gclid=abc123"
+    );
+    const url = new URL(result);
+    expect(url.searchParams.has("pz_preview")).toBe(false);
+    expect(url.searchParams.get("gclid")).toBe("abc123");
+  });
 });
 
 describe("renderPopup with linkAction: close", () => {

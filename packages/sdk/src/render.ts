@@ -229,6 +229,15 @@ export function renderPopup(host: HTMLElement, opts: RenderOptions): RenderedPop
   return { destroy };
 }
 
+// Never forwarded onto a click-through, even though it's just another
+// query param on the current page: pz_preview (see index.ts's
+// getPreviewCampaignId) is a QA-only flag that forces this exact popup to
+// render regardless of targeting/frequency/holdout. Carrying it forward
+// would mean a preview link a visitor stumbled onto (or a tester's own
+// browser history landing back on one) keeps forcing popups on every page
+// it propagates to instead of the one page it was meant for.
+const NEVER_FORWARDED_PARAMS = ["pz_preview"];
+
 /**
  * Carries ad-attribution query params (gclid, srsltid, utm_*, and whatever
  * new ones ad platforms invent next) from the page the visitor is on
@@ -244,7 +253,7 @@ export function forwardQueryParams(linkUrl: string, currentPageUrl: string): str
     const destination = new URL(linkUrl, currentPageUrl);
     const current = new URL(currentPageUrl).searchParams;
     for (const [key, value] of current) {
-      if (!destination.searchParams.has(key)) {
+      if (!destination.searchParams.has(key) && !NEVER_FORWARDED_PARAMS.includes(key)) {
         destination.searchParams.set(key, value);
       }
     }
