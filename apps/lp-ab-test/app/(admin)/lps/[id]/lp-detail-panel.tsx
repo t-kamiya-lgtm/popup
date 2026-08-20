@@ -129,11 +129,11 @@ export function LpDetailPanel({ lpId, canEdit }: { lpId: number; canEdit: boolea
             <p style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
               設置場所: サンクスページ（購入完了ページ）の <code>&lt;/body&gt;</code> 直前。
               1本目の <code>{"{注文番号}"}</code> 等はカート側の差し込みタグなので、そのまま貼り付けてください（値を書き換える必要はありません）。
-              HTML属性ではなくスクリプト内の代入文にしているのは、スマレジEC・リピート側の差し込みタグ展開が
-              スクリプトタグの属性値には効かないためです。
+              シングルクォート（<code>&#39;</code>）で囲む書き方にしているのは、カート側の差し込みタグ展開が
+              この引用符の書き方でのみ有効なため（ダブルクォートや属性値では展開されません）。
             </p>
             <TagBox
-              text={`<script>\n  window.__lpabCv = { lpId: ${lp.id}, orderId: "{注文番号}", revenue: {注文金額合計(税別)} };\n</script>\n<script async src="${appBaseUrl}/cv-tag.js"></script>`}
+              text={`<script>\n  var lpabOrderId = '{注文番号}';\n  var lpabRevenue = {注文金額合計(税別)};\n  window.__lpabCv = { lpId: ${lp.id}, orderId: lpabOrderId, revenue: lpabRevenue };\n</script>\n<script async src="${appBaseUrl}/cv-tag.js"></script>`}
             />
             <div style={{ marginTop: 12 }}>
               <TagCheckPanel lpId={lp.id} />
