@@ -91,6 +91,9 @@ export function LpDetailPanel({ lpId, canEdit }: { lpId: number; canEdit: boolea
   if (!lp) return <p>読み込み中...</p>;
 
   const appBaseUrl = process.env.NEXT_PUBLIC_APP_BASE_URL ?? "";
+  const slotOriginalAttrs = slots
+    .map((s) => ` data-original-${s.slotKey}="${escapeHtmlAttr(s.originalImageUrl)}"`)
+    .join("");
 
   return (
     <div>
@@ -122,9 +125,12 @@ export function LpDetailPanel({ lpId, canEdit }: { lpId: number; canEdit: boolea
             <p>LPに設置する差し替えタグ（1本）:</p>
             <p style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
               設置場所: LPページの <code>&lt;head&gt;</code> 直後（画像がブラウザに描画される前に実行させるため、
-              なるべく早い位置に置いてください）
+              なるべく早い位置に置いてください）。元画像のURLをタグ自体に含めているのは、差し替え判定が終わるまで
+              元画像を一瞬も表示させない（ちらつき防止）ためです。
             </p>
-            <TagBox text={`<script async src="${appBaseUrl}/tag.js" data-lp-id="${lp.id}"></script>`} />
+            <TagBox
+              text={`<script async src="${appBaseUrl}/tag.js" data-lp-id="${lp.id}"${slotOriginalAttrs}></script>`}
+            />
             <p style={{ marginTop: 12 }}>サンクスページに設置するCVタグ（2本セット）:</p>
             <p style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
               設置場所: カート管理画面の「アフィリエイト登録・編集」（出力画面: 注文完了画面、出力方式: タグ方式(body内)）。
@@ -199,6 +205,10 @@ export function LpDetailPanel({ lpId, canEdit }: { lpId: number; canEdit: boolea
       </div>
     </div>
   );
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
 function TagBox({ text }: { text: string }) {

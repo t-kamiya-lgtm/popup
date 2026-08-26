@@ -59,43 +59,70 @@ function waitForDomReady(): Promise<void> {
   return new Promise((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true }));
 }
 
+// Anti-flicker: hide the slots' original images via a CSS attribute
+// selector the instant this script runs, well before the DOM-ready wait or
+// the config fetch resolve — a <style> rule applies to matching elements
+// as soon as they're parsed into the DOM, so this works even if the <img>
+// doesn't exist yet, unlike a JS-driven hide. Swapping an image's `src`
+// (in applySlot) naturally drops it out of the selector's match and reveals
+// it immediately; anything left showing the original gets revealed by the
+// explicit removal in main()'s `finally`, and the timeout below is a pure
+// safety net (ad blocker, network failure, thrown error) so an image is
+// never left permanently invisible.
+function hideOriginals(urls: string[]): HTMLStyleElement | null {
+  if (urls.length === 0) return null;
+  const style = document.createElement("style");
+  style.textContent = `${urls.map((u) => `img[src="${cssEscape(u)}"]`).join(",")}{visibility:hidden}`;
+  (document.head ?? document.documentElement).appendChild(style);
+  return style;
+}
+
 async function main(script: HTMLScriptElement | null) {
   const lpId = Number(script?.dataset.lpId);
   if (!lpId) return;
 
-  const origin = script?.src ? new URL(script.src).origin : "";
-  // Start the config fetch immediately instead of waiting for the page to
-  // finish parsing first — the DOM-ready wait below (needed before the
-  // target <img> is guaranteed to exist) then overlaps with this network
-  // round-trip instead of stacking after it, which is what caused a
-  // visible delay before the image swap on slower-parsing LPs.
-  const configPromise = fetch(`${origin}/c/${lpId}`).then((res) => (res.ok ? (res.json() as Promise<LpConfig>) : null));
-  const [config] = await Promise.all([configPromise, waitForDomReady()]);
-  if (!config || !config.active) return; // LP delivery paused — do nothing, no imp beacon either
+  const hideUrls = [script?.dataset.originalA, script?.dataset.originalB].filter((u): u is string => Boolean(u));
+  const hideStyle = hideOriginals(hideUrls);
+  const revealTimer = hideStyle ? window.setTimeout(() => hideStyle.remove(), 1500) : undefined;
 
-  const sessionId = getSessionId();
-  const device = getDevice();
-  const picks: Record<"a" | "b", number | null> = { a: null, b: null };
+  try {
+    const origin = script?.src ? new URL(script.src).origin : "";
+    // Start the config fetch immediately instead of waiting for the page to
+    // finish parsing first — the DOM-ready wait below (needed before the
+    // target <img> is guaranteed to exist) then overlaps with this network
+    // round-trip instead of stacking after it, which is what caused a
+    // visible delay before the image swap on slower-parsing LPs.
+    const configPromise = fetch(`${origin}/c/${lpId}`).then((res) => (res.ok ? (res.json() as Promise<LpConfig>) : null));
+    const [config] = await Promise.all([configPromise, waitForDomReady()]);
+    if (!config || !config.active) return; // LP delivery paused — do nothing, no imp beacon either
 
-  for (const slot of config.slots) {
-    const picked = pickForSlot(sessionId, lpId, slot);
-    applySlot(slot, picked);
-    picks[slot.slotKey] = picked?.id ?? null;
+    const sessionId = getSessionId();
+    const device = getDevice();
+    const picks: Record<"a" | "b", number | null> = { a: null, b: null };
+
+    for (const slot of config.slots) {
+      const picked = pickForSlot(sessionId, lpId, slot);
+      applySlot(slot, picked);
+      picks[slot.slotKey] = picked?.id ?? null;
+    }
+
+    fetch(config.collectEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        type: "imp",
+        lpId,
+        sessionId,
+        device,
+        creativeAId: picks.a,
+        creativeBId: picks.b,
+      }),
+    }).catch(() => {});
+  } finally {
+    if (revealTimer !== undefined) window.clearTimeout(revealTimer);
+    hideStyle?.remove();
   }
-
-  fetch(config.collectEndpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    keepalive: true,
-    body: JSON.stringify({
-      type: "imp",
-      lpId,
-      sessionId,
-      device,
-      creativeAId: picks.a,
-      creativeBId: picks.b,
-    }),
-  }).catch(() => {});
 }
 
 // Must capture currentScript synchronously, right here at top-level load
