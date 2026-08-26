@@ -54,15 +54,24 @@ function cssEscape(value: string): string {
   return window.CSS?.escape ? window.CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
 }
 
+function waitForDomReady(): Promise<void> {
+  if (document.readyState !== "loading") return Promise.resolve();
+  return new Promise((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true }));
+}
+
 async function main(script: HTMLScriptElement | null) {
   const lpId = Number(script?.dataset.lpId);
   if (!lpId) return;
 
   const origin = script?.src ? new URL(script.src).origin : "";
-  const res = await fetch(`${origin}/c/${lpId}`);
-  if (!res.ok) return;
-  const config: LpConfig = await res.json();
-  if (!config.active) return; // LP delivery paused — do nothing, no imp beacon either
+  // Start the config fetch immediately instead of waiting for the page to
+  // finish parsing first — the DOM-ready wait below (needed before the
+  // target <img> is guaranteed to exist) then overlaps with this network
+  // round-trip instead of stacking after it, which is what caused a
+  // visible delay before the image swap on slower-parsing LPs.
+  const configPromise = fetch(`${origin}/c/${lpId}`).then((res) => (res.ok ? (res.json() as Promise<LpConfig>) : null));
+  const [config] = await Promise.all([configPromise, waitForDomReady()]);
+  if (!config || !config.active) return; // LP delivery paused — do nothing, no imp beacon either
 
   const sessionId = getSessionId();
   const device = getDevice();
@@ -94,8 +103,4 @@ async function main(script: HTMLScriptElement | null) {
 // reading it later (e.g. inside a deferred DOMContentLoaded callback) would
 // always see null and silently no-op.
 const currentScript = document.currentScript as HTMLScriptElement | null;
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => void main(currentScript));
-} else {
-  void main(currentScript);
-}
+void main(currentScript);
