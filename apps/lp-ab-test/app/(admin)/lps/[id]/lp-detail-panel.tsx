@@ -132,15 +132,20 @@ export function LpDetailPanel({ lpId, canEdit }: { lpId: number; canEdit: boolea
               text={`<script async src="${appBaseUrl}/tag.js" data-lp-id="${lp.id}"${slotOriginalAttrs}></script>`}
             />
             <p style={{ marginTop: 12 }}>サンクスページに設置するCVタグ（2本セット）:</p>
+            <p style={{ fontSize: 12, color: "#666", marginTop: 2, fontWeight: "bold" }}>
+              全LP共通のタグです。サイト全体で1回だけ設置すればOKで、LPごとに設置し直す必要はありません
+              （どのLPでのCVかは、サンクスページ側でこのLP専用に設定する必要はなく、収集側でセッションIDから自動的に判定します）。
+            </p>
             <p style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
-              設置場所: カート管理画面の「アフィリエイト登録・編集」（出力画面: 注文完了画面、出力方式: タグ方式(body内)）。
+              設置場所: カート管理画面の「アフィリエイト登録・編集」（出力画面: 注文完了画面、出力方式: タグ方式(body内)、
+              流入元URL条件は指定不要）。
               汎用の「HTML自由入力欄」（例: <code>&lt;/body&gt;</code>直前欄）には差し込みタグの展開が効かないことがあるため注意してください。
               1本目の <code>{"{注文番号}"}</code> 等はカート側の差し込みタグなので、そのまま貼り付けてください（値を書き換える必要はありません）。
               シングルクォート（<code>&#39;</code>）で囲む書き方にしているのは、カート側の差し込みタグ展開が
               この引用符の書き方でのみ有効なため（ダブルクォートや属性値では展開されません）。
             </p>
             <TagBox
-              text={`<script>\n  var lpabOrderId = '{注文番号}';\n  var lpabRevenue = {注文金額合計(税込)};\n  window.__lpabCv = { lpId: ${lp.id}, orderId: lpabOrderId, revenue: lpabRevenue };\n</script>\n<script async src="${appBaseUrl}/cv-tag.js"></script>`}
+              text={`<script>\n  var lpabOrderId = '{注文番号}';\n  var lpabRevenue = {注文金額合計(税込)};\n  window.__lpabCv = { orderId: lpabOrderId, revenue: lpabRevenue };\n</script>\n<script async src="${appBaseUrl}/cv-tag.js"></script>`}
             />
             <div style={{ marginTop: 12 }}>
               <TagCheckPanel lpId={lp.id} />

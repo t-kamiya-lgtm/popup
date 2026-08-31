@@ -25,7 +25,6 @@ interface ImpBody {
 }
 interface CvBody {
   type: "cv";
-  lpId: number;
   sessionId: string;
   orderId: string;
   revenue?: number;
@@ -38,7 +37,7 @@ interface CvBody {
  */
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as ImpBody | CvBody | null;
-  if (!body?.lpId || !body.sessionId) {
+  if (!body?.sessionId || (body.type === "imp" && !body.lpId)) {
     return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
   }
 
@@ -64,22 +63,27 @@ async function recordImpression(body: ImpBody) {
 }
 
 async function recordConversion(body: CvBody) {
-  // Snapshot which creatives were showing at this session's most recent
-  // impression on this LP (docs/lp-ab-test/01-data-model.md 9) — the
-  // thank-you page has no slots/creatives of its own.
+  // The CV tag is installed once, site-wide (not per LP), so it has no
+  // lp_id of its own — attribute the conversion to whichever LP this
+  // session's most recent impression came from, and snapshot the creatives
+  // shown at that impression (docs/lp-ab-test/01-data-model.md 9). session_id
+  // is stored in the LP's own domain's localStorage, so it's already shared
+  // across every LP a visitor saw there — this is what makes the lookup work.
   const { rows } = await pool().query(
-    `SELECT creative_a_id, creative_b_id FROM impressions
-     WHERE lp_id = $1 AND session_id = $2
+    `SELECT lp_id, creative_a_id, creative_b_id FROM impressions
+     WHERE session_id = $1
      ORDER BY occurred_at DESC LIMIT 1`,
-    [body.lpId, body.sessionId]
+    [body.sessionId]
   );
-  const creativeAId = rows[0]?.creative_a_id ?? null;
-  const creativeBId = rows[0]?.creative_b_id ?? null;
+  if (rows.length === 0) return; // no tracked impression for this session — nothing to attribute to
+  const lpId = Number(rows[0].lp_id);
+  const creativeAId = rows[0].creative_a_id ?? null;
+  const creativeBId = rows[0].creative_b_id ?? null;
 
   await pool().query(
     `INSERT INTO conversions (occurred_at, lp_id, session_id, order_id, revenue, creative_a_id, creative_b_id)
      VALUES (now(), $1, $2, $3, $4, $5, $6)
      ON CONFLICT (lp_id, order_id) WHERE order_id IS NOT NULL DO NOTHING`,
-    [body.lpId, body.sessionId, body.orderId, body.revenue ?? null, creativeAId, creativeBId]
+    [lpId, body.sessionId, body.orderId, body.revenue ?? null, creativeAId, creativeBId]
   );
 }

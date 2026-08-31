@@ -1,11 +1,19 @@
-// CV tag — installed on the thank-you page, independent of the popup tool's
-// own CV tag (docs/lp-ab-test/00-requirements.md 7: tags stay independent so
-// this tool works even where the popup tool isn't installed).
+// CV tag — installed ONCE, site-wide, on every thank-you page (not per LP —
+// independent of the popup tool's own CV tag per docs/lp-ab-test/
+// 00-requirements.md 7, so this tool works even where the popup tool isn't
+// installed).
 //
 // <script>
-//   window.__lpabCv = { lpId: 123, orderId: "{注文番号}", revenue: {注文金額合計(税別)} };
+//   window.__lpabCv = { orderId: "{注文番号}", revenue: {注文金額合計(税込)} };
 // </script>
 // <script async src="https://{host}/cv-tag.js"></script>
+//
+// No lpId here on purpose: the collector (app/e/route.ts) attributes the
+// conversion to whichever LP this session's most recent impression came
+// from, resolved server-side from session_id alone — the same session_id
+// is already shared across every LP a visitor saw on this domain (it's
+// written to that domain's own localStorage by tag.js), so this needs no
+// per-LP configuration.
 //
 // The order id/revenue must come from a global set by an inline <script>,
 // not from this script tag's own attributes: cart platforms (e.g. スマレジ
@@ -19,21 +27,19 @@
 const STORAGE_KEY = "lpab_sid";
 
 interface CvGlobal {
-  lpId: number;
   orderId: string;
   revenue?: number;
 }
 
 async function main(script: HTMLScriptElement | null) {
   const cv = (window as unknown as { __lpabCv?: CvGlobal }).__lpabCv;
-  const lpId = Number(cv?.lpId);
   const orderId = cv?.orderId;
   const revenue = cv?.revenue;
   // The cart template substitutes `{注文番号}` etc. server-side; if that
   // substitution didn't happen (e.g. tag pasted on a non-order page during
   // testing) the literal placeholder is still in the string — bail out
   // rather than recording a bogus conversion.
-  if (!lpId || !orderId || orderId.includes("{")) return;
+  if (!orderId || orderId.includes("{")) return;
 
   let sessionId: string | null = null;
   try {
@@ -48,7 +54,7 @@ async function main(script: HTMLScriptElement | null) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     keepalive: true,
-    body: JSON.stringify({ type: "cv", lpId, sessionId, orderId, revenue }),
+    body: JSON.stringify({ type: "cv", sessionId, orderId, revenue }),
   }).catch(() => {});
 }
 
